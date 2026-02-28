@@ -1,14 +1,18 @@
-<?php if ( ! defined('BASEPATH')) exit('No direct script access allowed');
+<?php if (!defined('BASEPATH'))
+	exit('No direct script access allowed');
 
-class Beranda extends CI_Controller {
-	function __construct() {
+class Beranda extends CI_Controller
+{
+	function __construct()
+	{
 		parent::__construct();
 
 		$this->load->model('m_dashboard');
 
 	}
 
-	function linear_interpolation($x) {
+	function linear_interpolation($x)
+	{
 		$data = [
 			[10, 0.251],
 			[20, 1.005],
@@ -128,7 +132,8 @@ class Beranda extends CI_Controller {
 		return $y;
 	}
 
-	function debit_interpolation($x) {
+	function debit_interpolation($x)
+	{
 		$data = [
 			[0.20, 12.60],
 			[0.40, 17.82],
@@ -189,20 +194,21 @@ class Beranda extends CI_Controller {
 		return $y;
 	}
 
-	function kalimeneng($tmaInput) {
+	function kalimeneng($tmaInput)
+	{
 		$data = [
-			['TMA' => 0.3,  'Cd' => 1.185, 'Bef' => 29.674],
+			['TMA' => 0.3, 'Cd' => 1.185, 'Bef' => 29.674],
 			['TMA' => 0.35, 'Cd' => 1.185, 'Bef' => 29.721],
-			['TMA' => 0.4,  'Cd' => 1.185, 'Bef' => 29.708],
-			['TMA' => 0.5,  'Cd' => 1.185, 'Bef' => 29.692],
-			['TMA' => 0.6,  'Cd' => 1.322, 'Bef' => 29.668],
-			['TMA' => 1.0,  'Cd' => 1.322, 'Bef' => 29.608],
-			['TMA' => 1.5,  'Cd' => 1.394, 'Bef' => 29.5],
-			['TMA' => 2.0,  'Cd' => 1.415, 'Bef' => 29.46],
-			['TMA' => 2.5,  'Cd' => 1.414, 'Bef' => 29.26],
-			['TMA' => 3.0,  'Cd' => 1.394, 'Bef' => 29.14],
-			['TMA' => 3.5,  'Cd' => 1.389, 'Bef' => 29.14],
-			['TMA' => 7.5,  'Cd' => 1.389, 'Bef' => 29.02],
+			['TMA' => 0.4, 'Cd' => 1.185, 'Bef' => 29.708],
+			['TMA' => 0.5, 'Cd' => 1.185, 'Bef' => 29.692],
+			['TMA' => 0.6, 'Cd' => 1.322, 'Bef' => 29.668],
+			['TMA' => 1.0, 'Cd' => 1.322, 'Bef' => 29.608],
+			['TMA' => 1.5, 'Cd' => 1.394, 'Bef' => 29.5],
+			['TMA' => 2.0, 'Cd' => 1.415, 'Bef' => 29.46],
+			['TMA' => 2.5, 'Cd' => 1.414, 'Bef' => 29.26],
+			['TMA' => 3.0, 'Cd' => 1.394, 'Bef' => 29.14],
+			['TMA' => 3.5, 'Cd' => 1.389, 'Bef' => 29.14],
+			['TMA' => 7.5, 'Cd' => 1.389, 'Bef' => 29.02],
 		];
 
 		$K = 1.705;
@@ -234,13 +240,13 @@ class Beranda extends CI_Controller {
 		return 0;
 	}
 
-	public function index(){
-		if($this->session->userdata('logged_in'))
-		{
+	public function index()
+	{
+		if ($this->session->userdata('logged_in')) {
 			$isUser2 = ($this->session->userdata('id_user') === '2');
 			if ($isUser2) {
 				$ktg = $this->db
-					->where_in('id_katlogger', ['2','7'])
+					->where_in('id_katlogger', ['2', '7'])
 					->get('kategori_logger')
 					->result_array();
 			} else {
@@ -250,8 +256,8 @@ class Beranda extends CI_Controller {
 					->result_array();
 			}
 			foreach ($ktg as $key => $kat) {
-				$tabelTemp = $kat['temp_data'];     
-				$idKat     = $kat['id_katlogger'];
+				$tabelTemp = $kat['temp_data'];
+				$idKat = $kat['id_katlogger'];
 
 				$this->db->from('t_logger')
 					->join('t_lokasi', 't_logger.lokasi_logger = t_lokasi.idlokasi', 'left')
@@ -296,44 +302,45 @@ class Beranda extends CI_Controller {
                 FROM parameter_sensor
                 WHERE logger_id IN ?
                 ORDER BY CAST(SUBSTRING(kolom_sensor,7) AS UNSIGNED)
-            ", [ $loggerIds ])
+            ", [$loggerIds])
 					->result_array();
 
 				$mapParams = [];
 				foreach ($paramRows as $pr) {
 					$lid = $pr['logger_id'];
-					if (!isset($mapParams[$lid])) $mapParams[$lid] = [];
+					if (!isset($mapParams[$lid]))
+						$mapParams[$lid] = [];
 					$mapParams[$lid][] = $pr;
 				}
 
 				$awalTs = time() - 3600; // 1 jam
-				$awal   = date('Y-m-d H:i', $awalTs);
-				$sd15Loggers = ['10247','10248','10288','10249','10290','10289','10345','10358','10347','10346','10348'];
+				$awal = date('Y-m-d H:i', $awalTs);
+				$sd15Loggers = ['10247', '10248', '10288', '10249', '10290', '10289', '10345', '10358', '10347', '10346', '10348'];
 
 				$listLogger = [];
 				foreach ($data_logger as $log) {
-					$idLogger   = $log['id_logger'];
+					$idLogger = $log['id_logger'];
 					$namaLokasi = $log['nama_lokasi'];
 
 					$temp = isset($mapTemp[$idLogger]) ? $mapTemp[$idLogger] : null;
 
 					$waktu = $temp && !empty($temp->waktu) ? $temp->waktu : null;
 
-					$color         = 'black';
-					$statusLogger  = 'Koneksi Terputus';
+					$color = 'black';
+					$statusLogger = 'Koneksi Terputus';
 
 					if ($waktu && $waktu >= $awal) {
-						$color        = '#32b344';
+						$color = '#32b344';
 						$statusLogger = 'Koneksi Terhubung';
 					}
 
 					if (!empty($mapPerbaikan[$idLogger])) {
-						$color        = '#7f6226';
+						$color = '#7f6226';
 						$statusLogger = 'Perbaikan';
 					}
 
 					$kolomSd = in_array($idLogger, $sd15Loggers, true) ? 'sensor15' : 'sensor13';
-					$sdcard  = 'Bermasalah';
+					$sdcard = 'Bermasalah';
 					if ($temp && isset($temp->$kolomSd) && $temp->$kolomSd === '1') {
 						$sdcard = 'OK';
 					}
@@ -341,19 +348,19 @@ class Beranda extends CI_Controller {
 					$paramList = isset($mapParams[$idLogger]) ? $mapParams[$idLogger] : [];
 					foreach ($paramList as $ky => $val) {
 						$kolom = $val['kolom_sensor'];
-						$h     = ($temp && isset($temp->$kolom)) ? $temp->$kolom : null;
+						$h = ($temp && isset($temp->$kolom)) ? $temp->$kolom : null;
 						if ($val['debit_awlr'] === '1' && $idLogger === '10063') {
-							$debit = $this->kalimeneng((float)$h);
-							$paramList[$ky]['nilai'] = number_format(max(0, (float)$debit), 2, '.', '');
+							$debit = $this->kalimeneng((float) $h);
+							$paramList[$ky]['nilai'] = number_format(max(0, (float) $debit), 2, '.', '');
 						} elseif ($val['nama_parameter'] === 'Debit' && $idLogger === '10249') {
-							$n2 = ($temp && isset($temp->sensor2)) ? (float)$temp->sensor2 : 0.0;
-							$paramList[$ky]['nilai'] = number_format($this->linear_interpolation($n2 * 100) * (float)$h, 2, '.', '');
+							$n2 = ($temp && isset($temp->sensor2)) ? (float) $temp->sensor2 : 0.0;
+							$paramList[$ky]['nilai'] = number_format($this->linear_interpolation($n2 * 100) * (float) $h, 2, '.', '');
 						} elseif ($val['nama_parameter'] === 'Luas_Penampang_Basah') {
-							$n2 = ($temp && isset($temp->sensor2)) ? (float)$temp->sensor2 : 0.0;
+							$n2 = ($temp && isset($temp->sensor2)) ? (float) $temp->sensor2 : 0.0;
 							$paramList[$ky]['nilai'] = number_format($this->linear_interpolation($n2 * 100), 2, '.', '');
 						} elseif ($val['nama_parameter'] === 'Debit_Aliran_Sungai') {
-							$s1 = ($temp && isset($temp->sensor1)) ? (float)$temp->sensor1 : 0.0;
-							$s2 = ($temp && isset($temp->sensor2)) ? (float)$temp->sensor2 : 0.0;
+							$s1 = ($temp && isset($temp->sensor1)) ? (float) $temp->sensor1 : 0.0;
+							$s2 = ($temp && isset($temp->sensor2)) ? (float) $temp->sensor2 : 0.0;
 							$n2 = $s1 - $s2;
 							if ($s2 > $s1) {
 								$paramList[$ky]['nilai'] = number_format(0, 2, '.', '');
@@ -365,23 +372,23 @@ class Beranda extends CI_Controller {
 						}
 
 						$get = http_build_query([
-							'id_param' => $val['id_param'].'_'.'bbws',
+							'id_param' => $val['id_param'] . '_' . 'bbws',
 						]);
-						$paramList[$ky]['link'] = 'analisa/set_sensordash?'.$get;
+						$paramList[$ky]['link'] = 'analisa/set_sensordash?' . $get;
 					}
 					if ($idLogger === '10247') {
 						// Peta param by id_param
 						$byId = [];
 						foreach ($paramList as $p) {
-							$byId[(string)$p['id_param']] = $p;
+							$byId[(string) $p['id_param']] = $p;
 						}
 
 						// Definisi grup
-						$shared   = ['330','331','332'];
-						$group1Id = '371';           
-						$group2Id = '372';           
-						$extra2   = ['374'];         
-						$extra1   = ['329'];        
+						$shared = ['330', '331', '332'];
+						$group1Id = '371';
+						$group2Id = '372';
+						$extra2 = ['374'];
+						$extra1 = ['329'];
 
 						$group1_ids = array_merge([$group1Id], $shared, $extra1);
 						$group2_ids = array_merge([$group2Id], $shared, $extra2);
@@ -389,208 +396,209 @@ class Beranda extends CI_Controller {
 						// Kumpulkan param sesuai grup (hanya yang ada)
 						$group1_params = [];
 						foreach ($group1_ids as $pid) {
-							if (isset($byId[$pid])) $group1_params[] = $byId[$pid];
+							if (isset($byId[$pid]))
+								$group1_params[] = $byId[$pid];
 						}
 						$group2_params = [];
 						foreach ($group2_ids as $pid) {
-							if (isset($byId[$pid])) $group2_params[] = $byId[$pid];
+							if (isset($byId[$pid]))
+								$group2_params[] = $byId[$pid];
 						}
 
 						// Tambahkan entri terpisah sesuai ketersediaan param
 						if (!empty($group1_params)) {
 							$listLogger[] = [
-								'id_logger'     => $idLogger . '_' . $group1Id,         // unik
-								'nama_lokasi'   => 'Pos AWLR Carik Barat',    // rename
-								'waktu'         => $waktu,
-								'color'         => $color,
+								'id_logger' => $idLogger . '_' . $group1Id,         // unik
+								'nama_lokasi' => 'Pos AWLR Carik Barat',    // rename
+								'waktu' => $waktu,
+								'color' => $color,
 								'status_logger' => $statusLogger,
-								'status_sd'     => $sdcard,
-								'param'         => $group1_params,                      // 371 + 330/331/332 + 324
+								'status_sd' => $sdcard,
+								'param' => $group1_params,                      // 371 + 330/331/332 + 324
 							];
 						}
 
 						if (!empty($group2_params)) {
 							$listLogger[] = [
-								'id_logger'     => $idLogger . '_' . $group2Id,         // unik
-								'nama_lokasi'   => 'Pos AWLR Sungai Bogowonto',    // rename
-								'waktu'         => $waktu,
-								'color'         => $color,
+								'id_logger' => $idLogger . '_' . $group2Id,         // unik
+								'nama_lokasi' => 'Pos AWLR Sungai Bogowonto',    // rename
+								'waktu' => $waktu,
+								'color' => $color,
 								'status_logger' => $statusLogger,
-								'status_sd'     => $sdcard,
-								'param'         => $group2_params,                      // 372 + 330/331/332 + 329
+								'status_sd' => $sdcard,
+								'param' => $group2_params,                      // 372 + 330/331/332 + 329
 							];
 						}
 					} else {
 						// default (logger normal, tidak di-split)
 						$listLogger[] = [
-							'id_logger'     => $idLogger,
-							
-							'nama_lokasi'   => $namaLokasi,
-							'waktu'         => $waktu,
-							'color'         => $color,
+							'id_logger' => $idLogger,
+
+							'nama_lokasi' => $namaLokasi,
+							'waktu' => $waktu,
+							'color' => $color,
 							'status_logger' => $statusLogger,
-							'status_sd'     => $sdcard,
-							'param'         => $paramList,
+							'status_sd' => $sdcard,
+							'param' => $paramList,
 						];
 					}
 				}
 				$ktg[$key]['logger'] = $listLogger;
 			}
 
-			$data_psda= json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/beranda'),true);
+			$data_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/beranda'), true);
 
-			foreach($ktg as $kw=>$sv){
-				if($sv['nama_kategori'] == 'AWLR'){
+			foreach ($ktg as $kw => $sv) {
+				if ($sv['nama_kategori'] == 'AWLR') {
 					$nama = 'Duga Air Sungai';
-					$logger_psda =  $data_psda[$nama]['logger'];
-					$merge= array_merge($logger_psda,$sv['logger']);
+					$logger_psda = $data_psda[$nama]['logger'];
+					$merge = array_merge($logger_psda, $sv['logger']);
 					$ktg[$kw]['logger'] = (array) $merge;
-				}elseif($sv['nama_kategori'] == 'ARR'){
+				} elseif ($sv['nama_kategori'] == 'ARR') {
 					$nama = 'Curah Hujan';
-					$logger_psda =  $data_psda[$nama]['logger'];
-					$merge= array_merge($logger_psda,$sv['logger']);
+					$logger_psda = $data_psda[$nama]['logger'];
+					$merge = array_merge($logger_psda, $sv['logger']);
 					$ktg[$kw]['logger'] = (array) $merge;
 				}
-				if($sv['nama_kategori'] == 'AWS'){
+				if ($sv['nama_kategori'] == 'AWS') {
 					$nama = 'Stasiun Cuaca';
-					$logger_psda =  $data_psda[$nama]['logger'];
-					$merge= array_merge($logger_psda,$sv['logger']);
+					$logger_psda = $data_psda[$nama]['logger'];
+					$merge = array_merge($logger_psda, $sv['logger']);
 					$ktg[$kw]['logger'] = (array) $merge;
 				}
 			}
-			$data['data_konten']=$ktg;
-			$data['konten']='konten/back/v_beranda2';
-			$this->load->view('template_admin/site',$data);
-		}else{
+			$data['data_konten'] = $ktg;
+			$data['konten'] = 'konten/back/v_beranda';
+			$this->load->view('template_admin/site', $data);
+		} else {
 			redirect('login');
 		}
 	}
 
 
-	public function integrasi(){
-		if($this->session->userdata('logged_in'))
-		{
-			$kategori=array();
-			if($this->session->userdata('id_user') =='2'){
-				$ktg = $this->db->where('id_katlogger','2')->or_where('id_katlogger','7')->get('kategori_logger')->result_array();
-			}else{
-				$ktg = $this->db->where('view','1')->get('kategori_logger')->result_array();
+	public function integrasi()
+	{
+		if ($this->session->userdata('logged_in')) {
+			$kategori = array();
+			if ($this->session->userdata('id_user') == '2') {
+				$ktg = $this->db->where('id_katlogger', '2')->or_where('id_katlogger', '7')->get('kategori_logger')->result_array();
+			} else {
+				$ktg = $this->db->where('view', '1')->get('kategori_logger')->result_array();
 			}
 
-			foreach ($ktg  as $key=>$kat) {
+			foreach ($ktg as $key => $kat) {
 
-				$tabel=$kat['temp_data'];
-				$content=array();
-				if($this->session->userdata('id_user')=='2'){
-					$data_logger = $this->db->join('t_lokasi', 't_logger.lokasi_logger = t_lokasi.idlokasi')->where('kategori_log',$kat['id_katlogger'])->where('t_logger.user_id','2')->order_by('id_logger')->get('t_logger')->result_array();
-				}else{
-					$data_logger = $this->db->join('t_lokasi', 't_logger.lokasi_logger = t_lokasi.idlokasi')->where('kategori_log',$kat['id_katlogger'])->where('t_lokasi.das !=','')->order_by('id_logger')->get('t_logger')->result_array();
+				$tabel = $kat['temp_data'];
+				$content = array();
+				if ($this->session->userdata('id_user') == '2') {
+					$data_logger = $this->db->join('t_lokasi', 't_logger.lokasi_logger = t_lokasi.idlokasi')->where('kategori_log', $kat['id_katlogger'])->where('t_logger.user_id', '2')->order_by('id_logger')->get('t_logger')->result_array();
+				} else {
+					$data_logger = $this->db->join('t_lokasi', 't_logger.lokasi_logger = t_lokasi.idlokasi')->where('kategori_log', $kat['id_katlogger'])->where('t_lokasi.das !=', '')->order_by('id_logger')->get('t_logger')->result_array();
 				}
 
-				foreach ($data_logger as $k=>$log){
-					$id_logger=$log['id_logger'];
-					$temp_data = $this->db->where('code_logger',$id_logger)->get($tabel)->row();
-					$awal=date('Y-m-d H:i',(mktime(date('H')-1)));
-					if($temp_data->waktu >= $awal){
-						$color="#32b344";
-						$status_logger="Koneksi Terhubung";
-					}else{
-						$color="black";
-						$status_logger="Koneksi Terputus";			
+				foreach ($data_logger as $k => $log) {
+					$id_logger = $log['id_logger'];
+					$temp_data = $this->db->where('code_logger', $id_logger)->get($tabel)->row();
+					$awal = date('Y-m-d H:i', (mktime(date('H') - 1)));
+					if ($temp_data->waktu >= $awal) {
+						$color = "#32b344";
+						$status_logger = "Koneksi Terhubung";
+					} else {
+						$color = "black";
+						$status_logger = "Koneksi Terputus";
 					}
-					$perbaikan = $this->db->get_where('t_perbaikan', array('id_logger'=> $id_logger))->row();
-					if($perbaikan){
-						$color="#7f6226";
-						$status_logger="Perbaikan";
+					$perbaikan = $this->db->get_where('t_perbaikan', array('id_logger' => $id_logger))->row();
+					if ($perbaikan) {
+						$color = "#7f6226";
+						$status_logger = "Perbaikan";
 					}
-					if($id_logger == '10247' or $id_logger == '10248' or $id_logger == '10288' or $id_logger == '10249' or $id_logger == '10290'){
+					if ($id_logger == '10247' or $id_logger == '10248' or $id_logger == '10288' or $id_logger == '10249' or $id_logger == '10290') {
 						$kolom_sd = 'sensor15';
-					}else{
+					} else {
 						$kolom_sd = 'sensor13';
 					}
-					if($temp_data->$kolom_sd == '1' )
-					{
-						$sdcard='OK';
-					}
-					else{
-						$sdcard='Bermasalah';
+					if ($temp_data->$kolom_sd == '1') {
+						$sdcard = 'OK';
+					} else {
+						$sdcard = 'Bermasalah';
 					}
 					$param = $this->db->query("SELECT * FROM `parameter_sensor` WHERE logger_id = '$id_logger' ORDER BY CAST(SUBSTR(`kolom_sensor`,7) AS UNSIGNED)")->result_array();
-					foreach($param as $ky => $val) {
-						$get='tabel='.$kat['tabel'].'&id_param='.$val['id_param'];
+					foreach ($param as $ky => $val) {
+						$get = 'tabel=' . $kat['tabel'] . '&id_param=' . $val['id_param'];
 						$kolom = $val['kolom_sensor'];
 						$h = $temp_data->$kolom;
-						if($val['debit_awlr'] == '1' and $id_logger == '10063'){
+						if ($val['debit_awlr'] == '1' and $id_logger == '10063') {
 							$debit = $this->kalimeneng($h);
-							if($h<0){
-								$param[$ky]['nilai'] = number_format(0,2,'.','') ;
-							}else{
-								$param[$ky]['nilai'] = number_format($debit,2,'.','') ;
+							if ($h < 0) {
+								$param[$ky]['nilai'] = number_format(0, 2, '.', '');
+							} else {
+								$param[$ky]['nilai'] = number_format($debit, 2, '.', '');
 							}
-						}elseif($val['nama_parameter'] == 'Debit' and $id_logger == '10249') {
+						} elseif ($val['nama_parameter'] == 'Debit' and $id_logger == '10249') {
 							$n2 = $temp_data->sensor2;
-							$param[$ky]['nilai'] = number_format($this->linear_interpolation($n2*100) *$h,2,'.','');
-						}elseif($val['nama_parameter'] == 'Luas_Penampang_Basah') {
+							$param[$ky]['nilai'] = number_format($this->linear_interpolation($n2 * 100) * $h, 2, '.', '');
+						} elseif ($val['nama_parameter'] == 'Luas_Penampang_Basah') {
 							$n2 = $temp_data->sensor2;
-							$param[$ky]['nilai'] = number_format($this->linear_interpolation($n2*100),2,'.','');
-						}elseif($val['nama_parameter'] == 'Debit_Aliran_Sungai') {
+							$param[$ky]['nilai'] = number_format($this->linear_interpolation($n2 * 100), 2, '.', '');
+						} elseif ($val['nama_parameter'] == 'Debit_Aliran_Sungai') {
 							$n2 = $temp_data->sensor1 - $temp_data->sensor2;
-							if($temp_data->sensor2 > $temp_data->sensor1){
-								$param[$ky]['nilai'] = number_format(0,2,'.','');
-							}else{
-								$param[$ky]['nilai'] = number_format($this->debit_interpolation($n2),2,'.','');
+							if ($temp_data->sensor2 > $temp_data->sensor1) {
+								$param[$ky]['nilai'] = number_format(0, 2, '.', '');
+							} else {
+								$param[$ky]['nilai'] = number_format($this->debit_interpolation($n2), 2, '.', '');
 							}
 
-						}else{
+						} else {
 							$param[$ky]['nilai'] = $h;
 						}
 
-						$param[$ky]['link'] = base_url() . 'analisa/set_sensordash?'.$get;
+						$param[$ky]['link'] = base_url() . 'analisa/set_sensordash?' . $get;
 					}
 					$ktg[$key]['logger'][$k] = [
-						'id_logger'=>$id_logger,
-						'nama_lokasi'=>$log['nama_lokasi'],
-						'waktu'=>$temp_data->waktu,
-						'color'=>$color,
-						'status_logger'=>$status_logger,
-						'status_sd'=>$sdcard,
-						'param'=>$param
+						'id_logger' => $id_logger,
+						'nama_lokasi' => $log['nama_lokasi'],
+						'waktu' => $temp_data->waktu,
+						'color' => $color,
+						'status_logger' => $status_logger,
+						'status_sd' => $sdcard,
+						'param' => $param
 					];
 				}
 			}
-			$data_psda= json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/beranda'),true);
+			$data_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/beranda'), true);
 
-			foreach($ktg as $kw=>$sv){
-				if($sv['nama_kategori'] == 'AWLR'){
+			foreach ($ktg as $kw => $sv) {
+				if ($sv['nama_kategori'] == 'AWLR') {
 					$nama = 'Duga Air Sungai';
-					$logger_psda =  $data_psda[$nama]['logger'];
-					$merge= array_merge($logger_psda,$sv['logger']);
+					$logger_psda = $data_psda[$nama]['logger'];
+					$merge = array_merge($logger_psda, $sv['logger']);
 					$ktg[$kw]['logger'] = (array) $merge;
-				}elseif($sv['nama_kategori'] == 'ARR'){
+				} elseif ($sv['nama_kategori'] == 'ARR') {
 					$nama = 'Curah Hujan';
-					$logger_psda =  $data_psda[$nama]['logger'];
-					$merge= array_merge($logger_psda,$sv['logger']);
+					$logger_psda = $data_psda[$nama]['logger'];
+					$merge = array_merge($logger_psda, $sv['logger']);
 					$ktg[$kw]['logger'] = (array) $merge;
 				}
-				if($sv['nama_kategori'] == 'AWS'){
+				if ($sv['nama_kategori'] == 'AWS') {
 					$nama = 'Stasiun Cuaca';
-					$logger_psda =  $data_psda[$nama]['logger'];
-					$merge= array_merge($logger_psda,$sv['logger']);
+					$logger_psda = $data_psda[$nama]['logger'];
+					$merge = array_merge($logger_psda, $sv['logger']);
 					$ktg[$kw]['logger'] = (array) $merge;
 				}
 			}
-			$data['data_konten']=$ktg;
-			$data['konten']='konten/back/v_beranda2';
-			$this->load->view('template_admin/site',$data);
-		}else{
+			$data['data_konten'] = $ktg;
+			$data['konten'] = 'konten/back/v_beranda2';
+			$this->load->view('template_admin/site', $data);
+		} else {
 			redirect('login');
 		}
 	}
-	function riset_rumus () {
-		$rumus = $this->db->where('id_logger','10052')->get('rumus_debit')->row()->rumus;
+	function riset_rumus()
+	{
+		$rumus = $this->db->where('id_logger', '10052')->get('rumus_debit')->row()->rumus;
 		$h = 0.514;
-		$newVariable = eval('return ' . $rumus . ';');
-		echo $newVariable; 
+		$newVariable = eval ('return ' . $rumus . ';');
+		echo $newVariable;
 		//echo $s;
 	}
 }
