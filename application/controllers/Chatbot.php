@@ -10,11 +10,16 @@ class Chatbot extends CI_Controller
         parent::__construct();
         $this->load->model('mlogin');
         $this->load->model('m_analisa');
+        $this->config->load('openai', TRUE);
+        $this->load->library('DateResolver');
     }
 
-    // ─── Helper: read JSON body ───
+    // ─── Helper: read JSON body (supports internal fake input) ───
     private function _json_input()
     {
+        if (!empty($this->_use_fake) && isset($this->_fake_input)) {
+            return $this->_fake_input;
+        }
         return json_decode(file_get_contents('php://input'), true) ?? [];
     }
 
@@ -23,6 +28,832 @@ class Chatbot extends CI_Controller
     {
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode($data);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  OPENAI CHAT ENDPOINT
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * POST /chatbot/chat
+     * Body: { "message": "...", "session_id": "..." (optional) }
+     *
+     * Session-based conversation: backend stores full message chain
+     * (including tool_calls + tool results) so multi-turn context works.
+     */
+    public function chat()
+    {
+        $input = $this->_json_input();
+        $message = isset($input['message']) ? trim($input['message']) : '';
+        $sid = isset($input['session_id']) ? $input['session_id'] : null;
+
+        if ($message === '') {
+            return $this->_json_response(['status' => 'error', 'message' => 'Pesan tidak boleh kosong']);
+        }
+
+        $api_key = $this->config->item('openai_api_key', 'openai');
+        if (empty($api_key)) {
+            return $this->_json_response(['status' => 'error', 'message' => 'API key OpenAI belum dikonfigurasi']);
+        }
+
+        $model = $this->config->item('openai_model', 'openai') ?: 'gpt-4o-mini';
+
+        // ── Load or create session ──
+        if (!$sid) {
+            $sid = uniqid('copilot_', true);
+        }
+        $messages = $this->_load_session($sid);
+
+        // If new session, prepend system prompt
+        if (empty($messages)) {
+            $messages[] = ['role' => 'system', 'content' => $this->_system_prompt()];
+        } else {
+            // Refresh system prompt (date/time changes each request)
+            $messages[0] = ['role' => 'system', 'content' => $this->_system_prompt()];
+        }
+
+        // Append current user message
+        $messages[] = ['role' => 'user', 'content' => $message];
+
+        // Token management: keep system + last N messages
+        $messages = $this->_trim_messages($messages, 40);
+
+        // OpenAI tools definition
+        $tools = $this->_openai_tools();
+
+        // ── First API call ──
+        $response = $this->_call_openai($api_key, $model, $messages, $tools);
+
+        if (!$response) {
+            return $this->_json_response(['status' => 'error', 'message' => 'Gagal menghubungi OpenAI API']);
+        }
+
+        // ── Handle tool calls (function calling loop, max 5 iterations) ──
+        $iterations = 0;
+        while (
+            isset($response['choices'][0]['message']['tool_calls']) &&
+            !empty($response['choices'][0]['message']['tool_calls']) &&
+            $iterations < 5
+        ) {
+            $assistant_msg = $response['choices'][0]['message'];
+            $messages[] = $assistant_msg; // includes tool_calls array
+
+            foreach ($assistant_msg['tool_calls'] as $tool_call) {
+                $fn_name = $tool_call['function']['name'];
+                $fn_args = json_decode($tool_call['function']['arguments'], true) ?? [];
+
+                // Execute the function internally
+                $fn_result = $this->_execute_tool($fn_name, $fn_args);
+
+                $messages[] = [
+                    'role' => 'tool',
+                    'tool_call_id' => $tool_call['id'],
+                    'content' => json_encode($fn_result, JSON_UNESCAPED_UNICODE)
+                ];
+            }
+
+            // Call OpenAI again with tool results
+            $response = $this->_call_openai($api_key, $model, $messages, $tools);
+
+            if (!$response) {
+                return $this->_json_response(['status' => 'error', 'message' => 'Gagal menghubungi OpenAI API']);
+            }
+
+            $iterations++;
+        }
+
+        // ── Extract final answer ──
+        $reply = isset($response['choices'][0]['message']['content'])
+            ? $response['choices'][0]['message']['content']
+            : 'Maaf, saya tidak bisa memproses permintaan Anda saat ini.';
+
+        // Append assistant's final reply to history
+        $messages[] = ['role' => 'assistant', 'content' => $reply];
+
+        // Save full conversation to session
+        $this->_save_session($sid, $messages);
+
+        $this->_json_response([
+            'status' => 'sukses',
+            'reply' => $reply,
+            'session_id' => $sid
+        ]);
+    }
+
+    // ─── Session Helpers: file-based conversation storage ───
+
+    private function _session_dir()
+    {
+        $dir = APPPATH . 'cache/copilot_sessions';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        return $dir;
+    }
+
+    private function _session_path($sid)
+    {
+        // Sanitize session ID to prevent directory traversal
+        $safe_sid = preg_replace('/[^a-zA-Z0-9_\.\-]/', '', $sid);
+        return $this->_session_dir() . '/' . $safe_sid . '.json';
+    }
+
+    private function _load_session($sid)
+    {
+        $path = $this->_session_path($sid);
+        if (file_exists($path)) {
+            $data = json_decode(file_get_contents($path), true);
+            return is_array($data) ? $data : [];
+        }
+        return [];
+    }
+
+    private function _save_session($sid, $messages)
+    {
+        $path = $this->_session_path($sid);
+        file_put_contents($path, json_encode($messages, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    }
+
+    /**
+     * Trim messages to stay within token budget.
+     * Keeps: system prompt (index 0) + last $max messages.
+     */
+    private function _trim_messages($messages, $max = 40)
+    {
+        if (count($messages) <= $max + 1) {
+            return $messages;
+        }
+
+        $system = [$messages[0]]; // always keep system prompt
+        $tail = array_slice($messages, -$max);
+
+        return array_merge($system, $tail);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  WHISPER TRANSCRIBE ENDPOINT
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * POST /chatbot/transcribe
+     * Body: multipart/form-data with 'audio' file
+     * Returns: { "status": "sukses", "text": "..." }
+     */
+    public function transcribe()
+    {
+        $api_key = $this->config->item('openai_api_key', 'openai');
+        if (empty($api_key)) {
+            return $this->_json_response(['status' => 'error', 'message' => 'API key OpenAI belum dikonfigurasi']);
+        }
+
+        // Check for uploaded audio file
+        if (!isset($_FILES['audio']) || $_FILES['audio']['error'] !== UPLOAD_ERR_OK) {
+            return $this->_json_response(['status' => 'error', 'message' => 'File audio tidak ditemukan']);
+        }
+
+        $tmp_path = $_FILES['audio']['tmp_name'];
+        $mime = $_FILES['audio']['type'];
+
+        // Map mime to extension (Whisper supports: mp3, mp4, mpeg, mpga, m4a, wav, webm)
+        $ext_map = [
+            'audio/webm' => 'webm',
+            'audio/ogg' => 'ogg',
+            'audio/wav' => 'wav',
+            'audio/wave' => 'wav',
+            'audio/mp3' => 'mp3',
+            'audio/mpeg' => 'mp3',
+            'audio/mp4' => 'mp4',
+            'audio/m4a' => 'm4a',
+        ];
+        $ext = isset($ext_map[$mime]) ? $ext_map[$mime] : 'webm';
+
+        // Send to Whisper API
+        $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
+        $cfile = new CURLFile($tmp_path, $mime, 'audio.' . $ext);
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $api_key,
+            ],
+            CURLOPT_POSTFIELDS => [
+                'file' => $cfile,
+                'model' => 'whisper-1',
+                'language' => 'id',  // Indonesian
+            ],
+        ]);
+
+        $response = curl_exec($ch);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        if ($err) {
+            log_message('error', 'Whisper API curl error: ' . $err);
+            return $this->_json_response(['status' => 'error', 'message' => 'Gagal menghubungi Whisper API']);
+        }
+
+        $decoded = json_decode($response, true);
+
+        if (isset($decoded['error'])) {
+            log_message('error', 'Whisper API error: ' . json_encode($decoded['error']));
+            return $this->_json_response(['status' => 'error', 'message' => 'Whisper API error: ' . ($decoded['error']['message'] ?? 'Unknown')]);
+        }
+
+        $text = isset($decoded['text']) ? trim($decoded['text']) : '';
+
+        $this->_json_response([
+            'status' => 'sukses',
+            'text' => $text
+        ]);
+    }
+
+    // ─── System Prompt ───
+    private function _system_prompt()
+    {
+        $now = date('Y-m-d H:i');
+        $hari_arr = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+        $hari = $hari_arr[date('w')];
+
+        return "Kamu adalah Copilot, asisten AI untuk sistem monitoring BBWS Serayu Opak (Balai Besar Wilayah Sungai). "
+            . "Tugasmu membantu pengguna memahami data dari pos-pos monitoring (logger) seperti AWS (Automatic Weather Station), "
+            . "ARR (Automatic Rain Recorder), AWLR (Automatic Water Level Recorder), dan sensor lainnya.\n\n"
+            . "Konteks waktu saat ini:\n"
+            . "- Sekarang: {$now} ({$hari})\n"
+            . "- Hari ini: " . date('Y-m-d') . "\n"
+            . "- Kemarin: " . date('Y-m-d', strtotime('-1 day')) . "\n"
+            . "- Bulan ini: " . date('Y-m') . "\n"
+            . "- Tahun ini: " . date('Y') . "\n"
+            . "- Gunakan informasi di atas sebagai referensi saja.\n\n"
+            . "Panduan:\n"
+            . "- Selalu jawab dalam Bahasa Indonesia yang ramah dan informatif.\n"
+            . "- Gunakan tools/function yang tersedia untuk mengambil data aktual dari database.\n"
+            . "- PENTING: Jika pengguna menyebut NAMA pos/lokasi (bukan ID angka), SELALU gunakan search_logger TERLEBIH DAHULU untuk mencari id_logger-nya. Contoh: 'data pos Seturan' → panggil search_logger(keyword='Seturan'), lalu gunakan id_logger dari hasilnya untuk memanggil fungsi lain.\n"
+            . "- PENTING: Jika pengguna menyebut referensi WAKTU/TANGGAL (seperti 'hari ini', '7 hari terakhir', 'bulan lalu', 'januari 2026'), SELALU gunakan resolve_date untuk menerjemahkan ke format tanggal yang benar. Gunakan hasil resolve_date (type, granularity, tanggal/bulan/tahun/start/end) sebagai parameter saat memanggil get_data_analisa.\n"
+            . "- Jika pengguna bertanya soal HUJAN, cuaca, curah hujan saat ini, pos mana yang hujan, atau kondisi hujan, gunakan cek_hujan.\n"
+            . "- Jika pengguna bertanya tentang daftar pos, gunakan get_logger_list.\n"
+            . "- Jika minta data realtime, gunakan get_data_realtime dengan id_logger.\n"
+            . "- Jika minta data historis / analisa, gunakan get_data_analisa.\n"
+            . "- Jika minta perbandingan, gunakan get_data_komparasi.\n"
+            . "- Format jawaban dengan rapi, gunakan emoji secukupnya.\n"
+            . "- Saat menampilkan data realtime/terbaru dari sensor, SELALU buat ringkasan singkat yang informatif. Contoh: jelaskan kondisi cuaca berdasarkan kecepatan angin (Tenang <1 m/s, Sepoi-sepoi 1-3 m/s, Ringan 3-5 m/s, Sedang 5-8 m/s, Agak Kencang 8-11 m/s, Kencang >11 m/s), suhu (Dingin <20°C, Sejuk 20-25°C, Hangat 25-30°C, Panas >30°C), kelembapan, tekanan udara, dan parameter lainnya.\n"
+            . "- Untuk data hujan, gunakan klasifikasi yang sudah disediakan di response (klasifikasi_jam dan klasifikasi_harian).\n"
+            . "- Jika data tidak tersedia atau error, sampaikan dengan sopan.\n"
+            . "- Jangan mengarang data, selalu ambil dari function yang tersedia.\n"
+            . "- Tampilkan data numerik dengan format yang mudah dibaca.";
+    }
+
+    // ─── OpenAI Tools Definition ───
+    private function _openai_tools()
+    {
+        return [
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'cek_hujan',
+                    'description' => 'Mengecek kondisi hujan/curah hujan saat ini di semua pos ARR dan AWS. Mengembalikan ringkasan dan detail pos yang mengalami hujan beserta klasifikasi per jam dan per hari. Gunakan ini jika pengguna bertanya tentang hujan, cuaca, curah hujan, atau pos mana yang sedang hujan.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'filter' => [
+                                'type' => 'string',
+                                'enum' => ['hujan_saja', 'semua'],
+                                'description' => 'Filter hasil: "hujan_saja" (default) hanya pos yang hujan, "semua" tampilkan semua pos termasuk yang tidak hujan'
+                            ]
+                        ],
+                        'required' => []
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'resolve_date',
+                    'description' => 'Menerjemahkan ekspresi tanggal natural language Bahasa Indonesia menjadi format tanggal terstruktur. WAJIB dipanggil jika pengguna menyebut referensi waktu seperti "hari ini", "kemarin", "7 hari terakhir", "bulan lalu", "minggu ini", "januari 2026", dll. Hasilnya digunakan sebagai parameter untuk get_data_analisa.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'text' => [
+                                'type' => 'string',
+                                'description' => 'Ekspresi tanggal dari pengguna, contoh: "hari ini", "kemarin", "7 hari terakhir", "bulan lalu", "minggu ini", "januari 2026", "1-15 maret 2026"'
+                            ]
+                        ],
+                        'required' => ['text']
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'search_logger',
+                    'description' => 'Mencari logger/pos monitoring berdasarkan nama atau lokasi. Gunakan ini TERLEBIH DAHULU jika pengguna menyebut nama pos (bukan ID angka). Mengembalikan daftar logger yang cocok beserta id_logger-nya.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'keyword' => [
+                                'type' => 'string',
+                                'description' => 'Kata kunci nama pos atau lokasi, contoh: "Seturan", "AWLR Seturan", "Kali Meneng", "Banjarnegara"'
+                            ]
+                        ],
+                        'required' => ['keyword']
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_logger_list',
+                    'description' => 'Mendapatkan daftar semua pos monitoring (logger) beserta statusnya. Bisa difilter berdasarkan kategori.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'kategori' => [
+                                'type' => 'string',
+                                'description' => 'ID kategori logger untuk filter. Gunakan "all" untuk semua kategori. Contoh: "1" untuk ARR, "2" untuk AWLR, "3" untuk AWS.'
+                            ]
+                        ],
+                        'required' => []
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_logger_detail',
+                    'description' => 'Mendapatkan detail informasi satu logger/pos monitoring tertentu berdasarkan ID.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id_logger' => [
+                                'type' => 'string',
+                                'description' => 'ID unik logger, contoh: "10063"'
+                            ]
+                        ],
+                        'required' => ['id_logger']
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_logger_parameter',
+                    'description' => 'Mendapatkan daftar parameter sensor yang dimiliki oleh satu logger.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id_logger' => [
+                                'type' => 'string',
+                                'description' => 'ID unik logger'
+                            ]
+                        ],
+                        'required' => ['id_logger']
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_logger_koneksi',
+                    'description' => 'Mengecek status koneksi (online/offline/perbaikan) dari satu logger.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id_logger' => [
+                                'type' => 'string',
+                                'description' => 'ID unik logger'
+                            ]
+                        ],
+                        'required' => ['id_logger']
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_data_realtime',
+                    'description' => 'Mendapatkan data terbaru (realtime) dari sensor di satu logger. Mode "last" untuk satu data terakhir, "live" untuk 25 data terakhir.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id_logger' => [
+                                'type' => 'string',
+                                'description' => 'ID unik logger'
+                            ],
+                            'mode' => [
+                                'type' => 'string',
+                                'enum' => ['last', 'live'],
+                                'description' => 'Mode: "last" untuk data terakhir saja, "live" untuk 25 data terbaru'
+                            ],
+                            'id_sensor' => [
+                                'type' => 'string',
+                                'description' => 'ID sensor (hanya diperlukan untuk mode "live")'
+                            ]
+                        ],
+                        'required' => ['id_logger']
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_data_analisa',
+                    'description' => 'Mendapatkan data analisa historis dari satu sensor. Bisa per hari, per bulan, per tahun, atau range tanggal.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id_logger' => [
+                                'type' => 'string',
+                                'description' => 'ID unik logger'
+                            ],
+                            'id_sensor' => [
+                                'type' => 'string',
+                                'description' => 'ID parameter sensor'
+                            ],
+                            'granularity' => [
+                                'type' => 'string',
+                                'enum' => ['day', 'month', 'year', 'range'],
+                                'description' => 'Granularity analisa'
+                            ],
+                            'tanggal' => [
+                                'type' => 'string',
+                                'description' => 'Tanggal (YYYY-MM-DD) untuk granularity "day"'
+                            ],
+                            'bulan' => [
+                                'type' => 'string',
+                                'description' => 'Bulan (YYYY-MM) untuk granularity "month"'
+                            ],
+                            'tahun' => [
+                                'type' => 'string',
+                                'description' => 'Tahun (YYYY) untuk granularity "year"'
+                            ],
+                            'start' => [
+                                'type' => 'string',
+                                'description' => 'Tanggal mulai (YYYY-MM-DD) untuk granularity "range"'
+                            ],
+                            'end' => [
+                                'type' => 'string',
+                                'description' => 'Tanggal akhir (YYYY-MM-DD) untuk granularity "range"'
+                            ]
+                        ],
+                        'required' => ['id_logger', 'id_sensor', 'granularity']
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_data_komparasi',
+                    'description' => 'Membandingkan data dari beberapa logger sekaligus pada tanggal tertentu.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'loggers' => [
+                                'type' => 'array',
+                                'items' => ['type' => 'string'],
+                                'description' => 'Array ID logger yang akan dibandingkan'
+                            ],
+                            'tanggal' => [
+                                'type' => 'string',
+                                'description' => 'Tanggal perbandingan (YYYY-MM-DD)'
+                            ]
+                        ],
+                        'required' => ['loggers']
+                    ]
+                ]
+            ]
+        ];
+    }
+
+    // ─── Execute tool internally (calls the existing methods via output buffer) ───
+    private function _execute_tool($fn_name, $args)
+    {
+        // Map tool names to internal methods and their expected input
+        $map = [
+            'cek_hujan' => 'cek_hujan',
+            'resolve_date' => 'resolve_date',
+            'search_logger' => 'search_logger',
+            'get_logger_list' => 'logger_list',
+            'get_logger_detail' => 'logger_detail',
+            'get_logger_parameter' => 'logger_parameter',
+            'get_logger_koneksi' => 'logger_koneksi',
+            'get_data_realtime' => 'data_realtime',
+            'get_data_analisa' => 'data_analisa',
+            'get_data_komparasi' => 'data_komparasi',
+        ];
+
+        if (!isset($map[$fn_name])) {
+            return ['status' => 'error', 'message' => "Fungsi {$fn_name} tidak dikenali"];
+        }
+
+        $method = $map[$fn_name];
+
+        // Override php://input by using a temporary stream for the method
+        // We call the method via a helper that fakes the JSON input
+        $result = $this->_call_internal($method, $args);
+
+        return $result;
+    }
+
+    // ─── Call an internal method, capturing its JSON output ───
+    private function _call_internal($method, $args)
+    {
+        // Store the original input
+        $GLOBALS['_chatbot_fake_input'] = json_encode($args);
+
+        // Temporarily override _json_input behavior
+        // We use output buffering to capture the echo'd JSON from the method
+        ob_start();
+
+        // Swap _json_input temporarily — we override via a flag
+        $this->_fake_input = $args;
+        $this->_use_fake = true;
+
+        $this->$method();
+
+        $this->_use_fake = false;
+
+        $output = ob_get_clean();
+
+        // Remove any extra headers that were set
+        if (!headers_sent()) {
+            header_remove('Content-Type');
+        }
+
+        $decoded = json_decode($output, true);
+        return $decoded ?: ['raw' => $output];
+    }
+
+    // Override _json_input to support internal calls
+    // (We need to re-check — the original is already defined above,
+    //  so we wrap it in the chat flow using a flag)
+
+    // ─── Call OpenAI Chat Completions API ───
+    private function _call_openai($api_key, $model, $messages, $tools)
+    {
+        $payload = [
+            'model' => $model,
+            'messages' => $messages,
+            'tools' => $tools,
+            'temperature' => 0.4,
+            'max_tokens' => 2048,
+        ];
+
+        $ch = curl_init('https://api.openai.com/v1/chat/completions');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_TIMEOUT => 60,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $api_key,
+            ],
+            CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        ]);
+
+        $response = curl_exec($ch);
+        $err = curl_error($ch);
+        curl_close($ch);
+
+        if ($err) {
+            log_message('error', 'OpenAI cURL error: ' . $err);
+            return null;
+        }
+
+        $decoded = json_decode($response, true);
+
+        if (isset($decoded['error'])) {
+            log_message('error', 'OpenAI API error: ' . json_encode($decoded['error']));
+            return null;
+        }
+
+        return $decoded;
+    }
+
+    // ═══════════════════════════════════════════
+    // CEK HUJAN — rainfall status across ARR/AWS
+    // ═══════════════════════════════════════════
+    public function cek_hujan()
+    {
+        $input = $this->_json_input();
+        $filter = isset($input['filter']) ? $input['filter'] : 'hujan_saja';
+
+        // Only query ARR & AWS categories
+        $query_kat = $this->db->query(
+            "SELECT * FROM kategori_logger WHERE view = 1 AND (controller = 'awr' OR controller = 'arr')"
+        );
+
+        $pos_hujan = [];
+        $pos_tidak_hujan = 0;
+        $pos_offline = 0;
+        $pos_perbaikan = 0;
+        $total_pos = 0;
+
+        foreach ($query_kat->result() as $kat) {
+            $tabel_temp = $kat->temp_data;
+
+            $query_logger = $this->db->query("
+                SELECT t_logger.*, t_lokasi.nama_lokasi, t_lokasi.latitude, t_lokasi.longitude
+                FROM t_logger
+                INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi
+                WHERE kategori_log = '{$kat->id_katlogger}'
+            ");
+
+            foreach ($query_logger->result() as $lok) {
+                $total_pos++;
+                $id_logger = $lok->id_logger;
+                $tabel_main = $lok->tabel_main;
+
+                // Cek perbaikan
+                $is_perbaikan = $this->db->where('id_logger', $id_logger)->count_all_results('t_perbaikan') > 0;
+                if ($is_perbaikan) {
+                    $pos_perbaikan++;
+                    continue;
+                }
+
+                // Cek koneksi
+                $temp = $this->db->where('code_logger', $id_logger)->get($tabel_temp)->row();
+                $waktu = $temp ? $temp->waktu : null;
+                $kn = $this->_cek_koneksi($waktu);
+
+                if ($kn !== 'On') {
+                    $pos_offline++;
+                    continue;
+                }
+
+                // Get primary rainfall sensor
+                $p_utama = $this->db
+                    ->where('logger_id', $id_logger)
+                    ->where('parameter_utama', '1')
+                    ->get('parameter_sensor')
+                    ->row();
+
+                if (!$p_utama)
+                    continue;
+
+                $kolom = $p_utama->kolom_sensor;
+
+                // Hourly accumulation (current hour)
+                $akum_jam = $this->db->query(
+                    "SELECT SUM({$kolom}) as val FROM {$tabel_main} WHERE code_logger = '{$id_logger}' AND waktu >= '" . date('Y-m-d H') . ":00'"
+                )->row();
+                $val_jam = $akum_jam->val ?? 0;
+
+                // Daily accumulation (today)
+                $akum_hari = $this->db->query(
+                    "SELECT SUM({$kolom}) as val FROM {$tabel_main} WHERE code_logger = '{$id_logger}' AND waktu >= '" . date('Y-m-d') . " 00:00'"
+                )->row();
+                $val_hari = $akum_hari->val ?? 0;
+
+                $klas_jam = $this->_klasifikasi_hujan_jam($val_jam);
+                $klas_hari = $this->_klasifikasi_hujan_harian($val_hari);
+                $is_hujan = ($val_jam > 0);
+
+                if ($is_hujan) {
+                    $pos_hujan[] = [
+                        'id_logger' => $id_logger,
+                        'nama_logger' => $lok->nama_logger,
+                        'lokasi' => $lok->nama_lokasi,
+                        'kategori' => $kat->nama_kategori,
+                        'curah_hujan_jam' => number_format($val_jam, 2, '.', ''),
+                        'klasifikasi_jam' => $klas_jam,
+                        'curah_hujan_harian' => number_format($val_hari, 2, '.', ''),
+                        'klasifikasi_harian' => $klas_hari,
+                        'waktu_terakhir' => $waktu
+                    ];
+                } else {
+                    if ($filter === 'semua') {
+                        $pos_hujan[] = [
+                            'id_logger' => $id_logger,
+                            'nama_logger' => $lok->nama_logger,
+                            'lokasi' => $lok->nama_lokasi,
+                            'kategori' => $kat->nama_kategori,
+                            'curah_hujan_jam' => '0.00',
+                            'klasifikasi_jam' => $klas_jam,
+                            'curah_hujan_harian' => number_format($val_hari, 2, '.', ''),
+                            'klasifikasi_harian' => $klas_hari,
+                            'waktu_terakhir' => $waktu
+                        ];
+                    }
+                    $pos_tidak_hujan++;
+                }
+            }
+        }
+
+        // Sort by heaviest rain first
+        usort($pos_hujan, function ($a, $b) {
+            return (float) $b['curah_hujan_jam'] <=> (float) $a['curah_hujan_jam'];
+        });
+
+        $jml_hujan = count(array_filter($pos_hujan, function ($p) {
+            return (float) $p['curah_hujan_jam'] > 0;
+        }));
+
+        $this->_json_response([
+            'status' => 'sukses',
+            'waktu' => date('Y-m-d H:i'),
+            'ringkasan' => "{$jml_hujan} dari {$total_pos} pos mendeteksi hujan saat ini",
+            'total_pos' => $total_pos,
+            'pos_hujan' => $jml_hujan,
+            'pos_tidak_hujan' => $pos_tidak_hujan,
+            'pos_offline' => $pos_offline,
+            'pos_perbaikan' => $pos_perbaikan,
+            'data' => $pos_hujan
+        ]);
+    }
+
+    // ═══════════════════════════════════════════
+    // RESOLVE DATE — natural language date parser
+    // ═══════════════════════════════════════════
+    public function resolve_date()
+    {
+        $input = $this->_json_input();
+        $text = isset($input['text']) ? trim($input['text']) : '';
+
+        if ($text === '') {
+            return $this->_json_response(['status' => 'error', 'message' => 'text wajib diisi']);
+        }
+
+        $result = $this->dateresolver->resolve($text);
+        $this->_json_response($result);
+    }
+
+    // ═══════════════════════════════════════════
+    // SEARCH LOGGER — fuzzy name search
+    // ═══════════════════════════════════════════
+    public function search_logger()
+    {
+        $input = $this->_json_input();
+        $keyword = isset($input['keyword']) ? trim($input['keyword']) : '';
+
+        if ($keyword === '') {
+            return $this->_json_response(['status' => 'error', 'message' => 'keyword wajib diisi']);
+        }
+
+        // Normalize keyword
+        $kw_lower = strtolower($keyword);
+
+        // Split keyword into parts for flexible matching
+        // e.g. "AWLR Seturan" → ["awlr", "seturan"]
+        $parts = preg_split('/[\s_\-]+/', $kw_lower);
+
+        // Build SQL LIKE conditions — match ANY part against nama_logger or nama_lokasi
+        $like_conditions = [];
+        foreach ($parts as $part) {
+            $part_escaped = $this->db->escape_like_str($part);
+            $like_conditions[] = "(LOWER(t_logger.nama_logger) LIKE '%{$part_escaped}%'
+                                   OR LOWER(t_lokasi.nama_lokasi) LIKE '%{$part_escaped}%')";
+        }
+        $where_like = implode(' AND ', $like_conditions);
+
+        $sql = "SELECT t_logger.id_logger, t_logger.nama_logger, 
+                       t_lokasi.nama_lokasi, kategori_logger.nama_kategori,
+                       t_lokasi.latitude, t_lokasi.longitude
+                FROM t_logger
+                INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi
+                INNER JOIN kategori_logger ON t_logger.kategori_log = kategori_logger.id_katlogger
+                WHERE {$where_like}
+                ORDER BY t_logger.nama_logger ASC
+                LIMIT 10";
+
+        $query = $this->db->query($sql);
+        $results = $query->result();
+
+        // Score results using similar_text for ranking
+        $scored = [];
+        foreach ($results as $row) {
+            $combined = strtolower($row->nama_kategori . ' ' . $row->nama_logger . ' ' . $row->nama_lokasi);
+            similar_text($kw_lower, $combined, $percent);
+
+            // Bonus if exact substring match in nama_logger or nama_lokasi
+            $bonus = 0;
+            if (stripos($row->nama_logger, $keyword) !== false)
+                $bonus += 30;
+            if (stripos($row->nama_lokasi, $keyword) !== false)
+                $bonus += 20;
+
+            $scored[] = [
+                'id_logger' => $row->id_logger,
+                'nama_logger' => $row->nama_logger,
+                'lokasi' => $row->nama_lokasi,
+                'kategori' => $row->nama_kategori,
+                'latitude' => $row->latitude,
+                'longitude' => $row->longitude,
+                'relevance' => round($percent + $bonus, 1)
+            ];
+        }
+
+        // Sort by relevance descending
+        usort($scored, function ($a, $b) {
+            return $b['relevance'] <=> $a['relevance'];
+        });
+
+        $this->_json_response([
+            'status' => 'sukses',
+            'keyword' => $keyword,
+            'total' => count($scored),
+            'data' => $scored
+        ]);
     }
 
     // ─── Helper: cek koneksi (1 jam terakhir) ───
@@ -37,13 +868,13 @@ class Chatbot extends CI_Controller
     {
         if ($mm <= 0)
             return 'Berawan / Tidak Hujan';
-        if ($mm < 1)
+        if ($mm <= 1)
             return 'Hujan Sangat Ringan';
-        if ($mm < 5)
+        if ($mm <= 5)
             return 'Hujan Ringan';
-        if ($mm < 10)
+        if ($mm <= 10)
             return 'Hujan Sedang';
-        if ($mm < 20)
+        if ($mm <= 20)
             return 'Hujan Lebat';
         return 'Hujan Sangat Lebat';
     }
@@ -53,13 +884,13 @@ class Chatbot extends CI_Controller
     {
         if ($mm <= 0)
             return 'Berawan / Tidak Hujan';
-        if ($mm < 10)
+        if ($mm <= 10)
+            return 'Hujan Sangat Ringan';
+        if ($mm <= 20)
             return 'Hujan Ringan';
-        if ($mm < 20)
-            return 'Hujan Ringan';
-        if ($mm < 50)
+        if ($mm <= 50)
             return 'Hujan Sedang';
-        if ($mm < 100)
+        if ($mm <= 100)
             return 'Hujan Lebat';
         return 'Hujan Sangat Lebat';
     }
@@ -594,13 +1425,46 @@ class Chatbot extends CI_Controller
 
             $koneksi = $this->_cek_koneksi($waktu);
             $out = [
-                'nama_logger' => $logger->nama_lokasi,
+                'nama_logger' => $logger->nama_logger,
+                'lokasi' => $logger->nama_lokasi,
+                'kategori' => $logger->nama_kategori,
                 'waktu' => $waktu,
                 'koneksi' => $koneksi,
                 'sensor' => $sensor_list
             ];
             if ($is_perbaikan)
                 $out['status_perangkat'] = 'perbaikan';
+
+            // Add rainfall classification for ARR/AWS
+            if ($koneksi === 'On' && ($logger->controller == 'awr' || $logger->controller == 'arr')) {
+                $p_utama = $this->db->where('logger_id', $id_logger)->where('parameter_utama', '1')->get('parameter_sensor')->row();
+                if ($p_utama) {
+                    $kolom_hujan = $p_utama->kolom_sensor;
+
+                    // Hourly accumulation
+                    $akum_jam = $this->db->query(
+                        "SELECT SUM({$kolom_hujan}) as val FROM {$logger->tabel_main} WHERE code_logger = '{$id_logger}' AND waktu >= '" . date('Y-m-d H') . ":00'"
+                    )->row();
+                    $val_jam = $akum_jam->val ?? 0;
+
+                    // Daily accumulation
+                    $akum_hari = $this->db->query(
+                        "SELECT SUM({$kolom_hujan}) as val FROM {$logger->tabel_main} WHERE code_logger = '{$id_logger}' AND waktu >= '" . date('Y-m-d') . " 00:00'"
+                    )->row();
+                    $val_hari = $akum_hari->val ?? 0;
+
+                    $out['curah_hujan_jam'] = [
+                        'nilai' => number_format($val_jam, 2, '.', ''),
+                        'satuan' => 'mm/jam',
+                        'klasifikasi' => $this->_klasifikasi_hujan_jam($val_jam)
+                    ];
+                    $out['curah_hujan_harian'] = [
+                        'nilai' => number_format($val_hari, 2, '.', ''),
+                        'satuan' => 'mm/hari',
+                        'klasifikasi' => $this->_klasifikasi_hujan_harian($val_hari)
+                    ];
+                }
+            }
 
             return $this->_json_response(['status' => 'sukses', 'data' => $out]);
         }
