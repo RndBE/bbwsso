@@ -53,12 +53,12 @@
         max-width: 760px;
         height: 85vh;
         max-height: 700px;
-        background: #212121;
+        background: #ffffff;
         border-radius: 16px;
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        box-shadow: 0 12px 48px rgba(0, 0, 0, .4);
+        box-shadow: 0 12px 48px rgba(0, 0, 0, .15);
         animation: copilotSlideUp .3s ease;
     }
 
@@ -80,12 +80,12 @@
         align-items: center;
         justify-content: space-between;
         padding: 16px 20px;
-        border-bottom: 1px solid #333;
+        border-bottom: 1px solid #e5e7eb;
     }
 
     #copilot-header h3 {
         margin: 0;
-        color: #fff;
+        color: #1f2937;
         font-size: 17px;
         font-weight: 600;
         font-family: Inter, system-ui, sans-serif;
@@ -105,7 +105,7 @@
     #copilot-close {
         background: none;
         border: none;
-        color: #9ca3af;
+        color: #6b7280;
         cursor: pointer;
         padding: 4px;
         border-radius: 6px;
@@ -113,8 +113,8 @@
     }
 
     #copilot-close:hover {
-        background: #333;
-        color: #fff;
+        background: #f3f4f6;
+        color: #1f2937;
     }
 
     /* ── Chat Body ── */
@@ -126,7 +126,7 @@
         flex-direction: column;
         gap: 16px;
         scrollbar-width: thin;
-        scrollbar-color: #444 transparent;
+        scrollbar-color: #d1d5db transparent;
     }
 
     /* Welcome Screen */
@@ -137,7 +137,7 @@
         align-items: center;
         justify-content: center;
         text-align: center;
-        color: #9ca3af;
+        color: #6b7280;
     }
 
     #copilot-welcome .icon-wrapper {
@@ -152,7 +152,7 @@
     }
 
     #copilot-welcome h4 {
-        color: #e5e7eb;
+        color: #1f2937;
         font-size: 20px;
         margin: 0 0 8px;
         font-family: Inter, system-ui, sans-serif;
@@ -175,9 +175,9 @@
     }
 
     .copilot-chip {
-        background: #2f2f2f;
-        border: 1px solid #444;
-        color: #d1d5db;
+        background: #f3f4f6;
+        border: 1px solid #e5e7eb;
+        color: #374151;
         padding: 8px 14px;
         border-radius: 20px;
         font-size: 13px;
@@ -187,9 +187,9 @@
     }
 
     .copilot-chip:hover {
-        background: #3a3a3a;
+        background: #e0e7ff;
         border-color: #4a4fc4;
-        color: #fff;
+        color: #303481;
     }
 
     /* Chat Bubbles */
@@ -198,7 +198,7 @@
         padding: 12px 16px;
         border-radius: 16px;
         font-size: 14px;
-        line-height: 1.6;
+        line-height: 1.45;
         font-family: Inter, system-ui, sans-serif;
         word-wrap: break-word;
     }
@@ -212,85 +212,143 @@
 
     .copilot-msg.bot {
         align-self: flex-start;
-        background: #2f2f2f;
-        color: #e5e7eb;
+        background: #f3f4f6;
+        color: #1f2937;
         border-bottom-left-radius: 4px;
     }
 
-    /* Markdown inside bot messages */
+    /* ── Markdown inside bot messages ── */
     .copilot-msg.bot strong {
-        color: #fff;
+        color: #111827;
     }
 
     .copilot-msg.bot em {
-        color: #c4b5fd;
+        color: #6d28d9;
     }
 
     .copilot-msg.bot code {
-        background: #1a1a1a;
-        padding: 2px 6px;
+        background: #e5e7eb;
+        padding: 1px 5px;
         border-radius: 4px;
-        font-size: 13px;
-        color: #a5f3fc;
+        font-size: 12.5px;
+        color: #be185d;
     }
 
-    .copilot-msg.bot ul,
-    .copilot-msg.bot ol {
+    .copilot-msg.bot pre {
+        background: #f3f4f6;
+        border-radius: 8px;
+        padding: 10px 12px;
         margin: 6px 0;
-        padding-left: 20px;
+        overflow-x: auto;
     }
 
-    .copilot-msg.bot li {
-        margin-bottom: 4px;
+    .copilot-msg.bot pre code {
+        background: none;
+        padding: 0;
+        font-size: 12.5px;
+        line-height: 1.4;
     }
 
     .copilot-msg.bot p {
-        margin: 0 0 8px;
+        margin: 0 0 6px;
     }
 
     .copilot-msg.bot p:last-child {
         margin-bottom: 0;
     }
 
+    .copilot-msg.bot ul,
+    .copilot-msg.bot ol {
+        margin: 4px 0 6px;
+        padding-left: 24px;
+    }
+
+    .copilot-msg.bot li {
+        margin-bottom: 2px;
+    }
+
+    .copilot-msg.bot li>p {
+        margin: 0;
+    }
+
+    .copilot-msg.bot h1,
+    .copilot-msg.bot h2,
+    .copilot-msg.bot h3,
+    .copilot-msg.bot h4,
+    .copilot-msg.bot h5,
+    .copilot-msg.bot h6 {
+        color: #303481;
+        margin: 8px 0 4px;
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    .copilot-msg.bot h1 {
+        font-size: 16px;
+    }
+
+    .copilot-msg.bot h2 {
+        font-size: 15px;
+    }
+
+    .copilot-msg.bot h1:first-child,
+    .copilot-msg.bot h2:first-child,
+    .copilot-msg.bot h3:first-child {
+        margin-top: 0;
+    }
+
+    .copilot-msg.bot hr {
+        border: none;
+        border-top: 1px solid #e5e7eb;
+        margin: 8px 0;
+    }
+
+    .copilot-msg.bot blockquote {
+        border-left: 3px solid #4a4fc4;
+        margin: 6px 0;
+        padding: 4px 12px;
+        color: #6b7280;
+    }
+
     .copilot-msg.bot table {
         width: 100%;
         border-collapse: collapse;
-        margin: 8px 0;
+        margin: 6px 0;
         font-size: 13px;
     }
 
     .copilot-msg.bot th,
     .copilot-msg.bot td {
-        border: 1px solid #444;
-        padding: 6px 10px;
+        border: 1px solid #e5e7eb;
+        padding: 5px 8px;
         text-align: left;
     }
 
     .copilot-msg.bot th {
-        background: #1a1a1a;
-        color: #a5b4fc;
+        background: #eef2ff;
+        color: #303481;
         font-weight: 600;
     }
 
     /* Error message style */
     .copilot-msg.bot.error {
-        background: #3b1f1f;
+        background: #fef2f2;
         border-left: 3px solid #ef4444;
     }
 
     /* ── Input Area ── */
     #copilot-input-area {
         padding: 12px 16px 16px;
-        border-top: 1px solid #333;
-        background: #212121;
+        border-top: 1px solid #e5e7eb;
+        background: #ffffff;
     }
 
     #copilot-input-wrap {
         display: flex;
         align-items: flex-end;
         gap: 8px;
-        background: #2f2f2f;
-        border: 1px solid #444;
+        background: #f9fafb;
+        border: 1px solid #d1d5db;
         border-radius: 12px;
         padding: 8px 12px;
         transition: border-color .2s;
@@ -305,7 +363,7 @@
         background: none;
         border: none;
         outline: none;
-        color: #e5e7eb;
+        color: #1f2937;
         font-size: 14px;
         font-family: Inter, system-ui, sans-serif;
         resize: none;
@@ -338,7 +396,7 @@
     }
 
     #copilot-send:disabled {
-        background: #444;
+        background: #d1d5db;
         cursor: default;
     }
 
@@ -346,7 +404,7 @@
     #copilot-mic {
         background: none;
         border: none;
-        color: #9ca3af;
+        color: #6b7280;
         width: 36px;
         height: 36px;
         border-radius: 8px;
@@ -359,8 +417,8 @@
     }
 
     #copilot-mic:hover {
-        background: #333;
-        color: #fff;
+        background: #f3f4f6;
+        color: #1f2937;
     }
 
     #copilot-mic.recording {
@@ -404,25 +462,78 @@
         animation: copilotWave 0.8s ease-in-out infinite;
     }
 
-    #copilot-wave .wave-bar:nth-child(1) { animation-delay: 0s; }
-    #copilot-wave .wave-bar:nth-child(2) { animation-delay: 0.1s; }
-    #copilot-wave .wave-bar:nth-child(3) { animation-delay: 0.2s; }
-    #copilot-wave .wave-bar:nth-child(4) { animation-delay: 0.3s; }
-    #copilot-wave .wave-bar:nth-child(5) { animation-delay: 0.4s; }
-    #copilot-wave .wave-bar:nth-child(6) { animation-delay: 0.3s; }
-    #copilot-wave .wave-bar:nth-child(7) { animation-delay: 0.2s; }
-    #copilot-wave .wave-bar:nth-child(8) { animation-delay: 0.1s; }
-    #copilot-wave .wave-bar:nth-child(9) { animation-delay: 0s; }
-    #copilot-wave .wave-bar:nth-child(10) { animation-delay: 0.15s; }
-    #copilot-wave .wave-bar:nth-child(11) { animation-delay: 0.25s; }
-    #copilot-wave .wave-bar:nth-child(12) { animation-delay: 0.35s; }
-    #copilot-wave .wave-bar:nth-child(13) { animation-delay: 0.2s; }
-    #copilot-wave .wave-bar:nth-child(14) { animation-delay: 0.1s; }
-    #copilot-wave .wave-bar:nth-child(15) { animation-delay: 0.05s; }
+    #copilot-wave .wave-bar:nth-child(1) {
+        animation-delay: 0s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(2) {
+        animation-delay: 0.1s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(3) {
+        animation-delay: 0.2s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(4) {
+        animation-delay: 0.3s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(5) {
+        animation-delay: 0.4s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(6) {
+        animation-delay: 0.3s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(7) {
+        animation-delay: 0.2s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(8) {
+        animation-delay: 0.1s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(9) {
+        animation-delay: 0s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(10) {
+        animation-delay: 0.15s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(11) {
+        animation-delay: 0.25s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(12) {
+        animation-delay: 0.35s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(13) {
+        animation-delay: 0.2s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(14) {
+        animation-delay: 0.1s;
+    }
+
+    #copilot-wave .wave-bar:nth-child(15) {
+        animation-delay: 0.05s;
+    }
 
     @keyframes copilotWave {
-        0%, 100% { height: 6px; opacity: 0.4; }
-        50% { height: 24px; opacity: 1; }
+
+        0%,
+        100% {
+            height: 6px;
+            opacity: 0.4;
+        }
+
+        50% {
+            height: 24px;
+            opacity: 1;
+        }
     }
 
     #copilot-wave .wave-label {
@@ -436,8 +547,15 @@
     }
 
     @keyframes copilotBlink {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.4; }
+
+        0%,
+        100% {
+            opacity: 1;
+        }
+
+        50% {
+            opacity: 0.4;
+        }
     }
 
     /* ── Typing Indicator ── */
@@ -585,6 +703,8 @@
     </div>
 </div>
 
+<!-- Marked.js for Markdown rendering -->
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 <script>
     (function () {
         // ── Config ──
@@ -778,6 +898,16 @@
                     }
 
                     if (data.status === 'sukses' && data.reply) {
+                        // Debug: log tool calls to console
+                        if (data._debug && data._debug.length) {
+                            console.group('%c🔧 Copilot Tool Calls', 'color:#a5b4fc;font-weight:bold');
+                            data._debug.forEach(function (d, i) {
+                                console.log('%c[' + (i + 1) + '] ' + d.tool, 'color:#4ade80;font-weight:bold');
+                                console.log('  Args: ' + JSON.stringify(d.args));
+                                console.log('  Result: ' + d.result_preview);
+                            });
+                            console.groupEnd();
+                        }
                         var html = renderMarkdown(data.reply);
                         addMsg(html, 'bot', true);
                     } else {
@@ -824,78 +954,23 @@
             setTimeout(function () { body.scrollTop = body.scrollHeight; }, 50);
         }
 
-        // ── Simple Markdown Renderer ──
+        // ── Markdown Renderer (using marked.js) ──
         function renderMarkdown(text) {
-            // Escape HTML first
-            var html = text
+            if (typeof marked !== 'undefined') {
+                marked.setOptions({
+                    breaks: true,       // \n → <br>
+                    gfm: true,          // GitHub Flavored Markdown (tables, strikethrough)
+                    headerIds: false,   // don't add id to headings
+                    mangle: false       // don't escape email
+                });
+                return marked.parse(text);
+            }
+            // Fallback: basic escaping if marked.js fails to load
+            return text
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-
-            // Code blocks (```)
-            html = html.replace(/```[\s\S]*?```/g, function (match) {
-                var code = match.replace(/```\w*\n?/g, '').replace(/```$/g, '');
-                return '<code style="display:block;white-space:pre-wrap;padding:8px;background:#1a1a1a;border-radius:6px;margin:6px 0">' + code + '</code>';
-            });
-
-            // Inline code
-            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-            // Bold
-            html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-            // Italic
-            html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-            // Tables (simple markdown table parsing)
-            html = html.replace(/((?:^\|.+\|$\n?)+)/gm, function (tableBlock) {
-                var rows = tableBlock.trim().split('\n');
-                if (rows.length < 2) return tableBlock;
-
-                var tableHtml = '<table>';
-                rows.forEach(function (row, idx) {
-                    // Skip separator row (|---|---|)
-                    if (/^\|[\s\-:|]+\|$/.test(row)) return;
-
-                    var cells = row.split('|').filter(function (c, i, arr) {
-                        return i > 0 && i < arr.length - 1;
-                    });
-                    var tag = (idx === 0) ? 'th' : 'td';
-                    tableHtml += '<tr>';
-                    cells.forEach(function (cell) {
-                        tableHtml += '<' + tag + '>' + cell.trim() + '</' + tag + '>';
-                    });
-                    tableHtml += '</tr>';
-                });
-                tableHtml += '</table>';
-                return tableHtml;
-            });
-
-            // Unordered lists
-            html = html.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
-            html = html.replace(/((<li>.*<\/li>\n?)+)/g, function (m) {
-                return '<ul>' + m + '</ul>';
-            });
-
-            // Ordered lists
-            html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-            // Headers
-            html = html.replace(/^### (.+)$/gm, '<strong style="font-size:14px;color:#a5b4fc">$1</strong>');
-            html = html.replace(/^## (.+)$/gm, '<strong style="font-size:15px;color:#a5b4fc">$1</strong>');
-            html = html.replace(/^# (.+)$/gm, '<strong style="font-size:16px;color:#a5b4fc">$1</strong>');
-
-            // Line breaks (double newline = paragraph, single = br)
-            html = html.replace(/\n\n/g, '</p><p>');
-            html = html.replace(/\n/g, '<br>');
-
-            // Wrap in paragraph
-            html = '<p>' + html + '</p>';
-
-            // Clean empty paragraphs
-            html = html.replace(/<p>\s*<\/p>/g, '');
-
-            return html;
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>');
         }
     })();
 </script>

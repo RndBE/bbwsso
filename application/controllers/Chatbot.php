@@ -84,12 +84,14 @@ class Chatbot extends CI_Controller
         // ── First API call ──
         $response = $this->_call_openai($api_key, $model, $messages, $tools);
 
-        if (!$response) {
-            return $this->_json_response(['status' => 'error', 'message' => 'Gagal menghubungi OpenAI API']);
+        if (!$response || isset($response['_error'])) {
+            $err_detail = isset($response['_error']) ? $response['_error'] : 'Gagal menghubungi OpenAI API';
+            return $this->_json_response(['status' => 'error', 'message' => $err_detail]);
         }
 
         // ── Handle tool calls (function calling loop, max 5 iterations) ──
         $iterations = 0;
+        $debug_log = []; // debug: track all tool calls
         while (
             isset($response['choices'][0]['message']['tool_calls']) &&
             !empty($response['choices'][0]['message']['tool_calls']) &&
@@ -110,13 +112,21 @@ class Chatbot extends CI_Controller
                     'tool_call_id' => $tool_call['id'],
                     'content' => json_encode($fn_result, JSON_UNESCAPED_UNICODE)
                 ];
+
+                // debug: record tool call + result
+                $debug_log[] = [
+                    'tool' => $fn_name,
+                    'args' => $fn_args,
+                    'result_preview' => mb_substr(json_encode($fn_result, JSON_UNESCAPED_UNICODE), 0, 2000)
+                ];
             }
 
             // Call OpenAI again with tool results
             $response = $this->_call_openai($api_key, $model, $messages, $tools);
 
-            if (!$response) {
-                return $this->_json_response(['status' => 'error', 'message' => 'Gagal menghubungi OpenAI API']);
+            if (!$response || isset($response['_error'])) {
+                $err_detail = isset($response['_error']) ? $response['_error'] : 'Gagal menghubungi OpenAI API';
+                return $this->_json_response(['status' => 'error', 'message' => $err_detail]);
             }
 
             $iterations++;
@@ -135,8 +145,9 @@ class Chatbot extends CI_Controller
 
         $this->_json_response([
             'status' => 'sukses',
+            'session_id' => $sid,
             'reply' => $reply,
-            'session_id' => $sid
+            '_debug' => $debug_log
         ]);
     }
 
@@ -277,28 +288,44 @@ class Chatbot extends CI_Controller
         $hari = $hari_arr[date('w')];
 
         return "Kamu adalah Copilot, asisten AI untuk sistem monitoring BBWS Serayu Opak (Balai Besar Wilayah Sungai). "
-            . "Tugasmu membantu pengguna memahami data dari pos-pos monitoring (logger) seperti AWS (Automatic Weather Station), "
-            . "ARR (Automatic Rain Recorder), AWLR (Automatic Water Level Recorder), dan sensor lainnya.\n\n"
+            . "Tugasmu membantu pengguna memahami data dari pos-pos monitoring (logger) seperti AWS, ARR, AWLR, dan sensor lainnya.\n\n"
+            . "PENGETAHUAN KATEGORI LOGGER:\n"
+            . "- AWS (Automatic Weather Station): sensor cuaca LENGKAP (suhu, kelembapan, angin, tekanan udara, radiasi matahari, curah hujan). Pertanyaan 'cuaca', 'suhu', 'kelembapan', 'angin', 'tekanan' → cari pos AWS.\n"
+            . "- ARR (Automatic Rain Recorder): KHUSUS sensor curah hujan. Pertanyaan 'hujan' bisa AWS atau ARR.\n"
+            . "- AWLR (Automatic Water Level Recorder): sensor TMA (Tinggi Muka Air) dan debit sungai. Pertanyaan 'tinggi muka air', 'debit', 'TMA', 'banjir' → cari pos AWLR.\n"
+            . "- Klimatologi: mirip AWS, sensor cuaca lengkap.\n"
+            . "- AFMR (Automatic Flow Meter Recorder): sensor debit sungai.\n\n"
+            . "ATURAN PENTING SAAT USER TIDAK MENYEBUT POS SPESIFIK:\n"
+            . "- Jika user tanya 'cuaca 7 hari terakhir' TANPA menyebut pos → TANYAKAN pos mana yang dimaksud. Jangan loop semua pos.\n"
+            . "- Jika user tanya tentang cuaca umum → gunakan search_logger(keyword='aws') untuk cari pos AWS, lalu tanyakan pos mana.\n"
+            . "- Jika user tanya tentang hujan di suatu wilayah → gunakan cek_hujan untuk status live, atau gunakan search_logger(keyword='arr') untuk cari pos ARR/AWS.\n"
+            . "- Jika user tanya tentang TMA/debit → gunakan search_logger(keyword='awlr') untuk cari pos AWLR.\n"
+            . "- JANGAN PERNAH loop panggil get_data_ringkasan untuk semua pos → token akan habis!\n\n"
             . "Konteks waktu saat ini:\n"
             . "- Sekarang: {$now} ({$hari})\n"
             . "- Hari ini: " . date('Y-m-d') . "\n"
             . "- Kemarin: " . date('Y-m-d', strtotime('-1 day')) . "\n"
             . "- Bulan ini: " . date('Y-m') . "\n"
-            . "- Tahun ini: " . date('Y') . "\n"
-            . "- Gunakan informasi di atas sebagai referensi saja.\n\n"
+            . "- Tahun ini: " . date('Y') . "\n\n"
             . "Panduan:\n"
             . "- Selalu jawab dalam Bahasa Indonesia yang ramah dan informatif.\n"
             . "- Gunakan tools/function yang tersedia untuk mengambil data aktual dari database.\n"
-            . "- PENTING: Jika pengguna menyebut NAMA pos/lokasi (bukan ID angka), SELALU gunakan search_logger TERLEBIH DAHULU untuk mencari id_logger-nya. Contoh: 'data pos Seturan' → panggil search_logger(keyword='Seturan'), lalu gunakan id_logger dari hasilnya untuk memanggil fungsi lain.\n"
-            . "- PENTING: Jika pengguna menyebut referensi WAKTU/TANGGAL (seperti 'hari ini', '7 hari terakhir', 'bulan lalu', 'januari 2026'), SELALU gunakan resolve_date untuk menerjemahkan ke format tanggal yang benar. Gunakan hasil resolve_date (type, granularity, tanggal/bulan/tahun/start/end) sebagai parameter saat memanggil get_data_analisa.\n"
-            . "- Jika pengguna bertanya soal HUJAN, cuaca, curah hujan saat ini, pos mana yang hujan, atau kondisi hujan, gunakan cek_hujan.\n"
-            . "- Jika pengguna bertanya tentang daftar pos, gunakan get_logger_list.\n"
-            . "- Jika minta data realtime, gunakan get_data_realtime dengan id_logger.\n"
-            . "- Jika minta data historis / analisa, gunakan get_data_analisa.\n"
+            . "- PENTING: Jika pengguna menyebut NAMA pos/lokasi (bukan ID angka), SELALU gunakan search_logger TERLEBIH DAHULU.\n"
+            . "- PENTING: Jika pengguna menyebut referensi WAKTU/TANGGAL, SELALU gunakan resolve_date.\n"
+            . "- cek_hujan HANYA untuk kondisi hujan SAAT INI / LIVE. JANGAN gunakan cek_hujan untuk data historis!\n"
+            . "- Untuk data curah hujan HISTORIS → HARUS gunakan get_data_ringkasan dengan parameter='hujan'.\n"
+            . "- PENTING STRATEGI DATA HISTORIS:\n"
+            . "  * Untuk semua data historis, SELALU gunakan get_data_ringkasan sebagai pilihan UTAMA.\n"
+            . "  * Mode 1 hari: set tanggal='YYYY-MM-DD'.\n"
+            . "  * Mode range (misal '7 hari terakhir'): gunakan resolve_date untuk dapat start/end, lalu set start dan end di get_data_ringkasan.\n"
+            . "  * Mode bulanan: set bulan='YYYY-MM'.\n"
+            . "  * Jika user hanya tanya SATU parameter → tambahkan filter parameter.\n"
+            . "  * Gunakan get_data_analisa HANYA jika user minta data DETAIL PER-JAM untuk SATU parameter SPESIFIK.\n"
+            . "  * JANGAN PERNAH memanggil get_data_analisa berulang kali untuk banyak parameter!\n"
             . "- Jika minta perbandingan, gunakan get_data_komparasi.\n"
-            . "- Format jawaban dengan rapi, gunakan emoji secukupnya.\n"
-            . "- Saat menampilkan data realtime/terbaru dari sensor, SELALU buat ringkasan singkat yang informatif. Contoh: jelaskan kondisi cuaca berdasarkan kecepatan angin (Tenang <1 m/s, Sepoi-sepoi 1-3 m/s, Ringan 3-5 m/s, Sedang 5-8 m/s, Agak Kencang 8-11 m/s, Kencang >11 m/s), suhu (Dingin <20°C, Sejuk 20-25°C, Hangat 25-30°C, Panas >30°C), kelembapan, tekanan udara, dan parameter lainnya.\n"
-            . "- Untuk data hujan, gunakan klasifikasi yang sudah disediakan di response (klasifikasi_jam dan klasifikasi_harian).\n"
+            . "- Format jawaban dengan rapi. Gunakan tabel markdown untuk data ringkasan.\n"
+            . "- Saat menampilkan data, SELALU buat ringkasan singkat yang informatif.\n"
+            . "- Untuk data hujan, gunakan klasifikasi yang sudah disediakan di response.\n"
             . "- Jika data tidak tersedia atau error, sampaikan dengan sopan.\n"
             . "- Jangan mengarang data, selalu ambil dari function yang tersedia.\n"
             . "- Tampilkan data numerik dengan format yang mudah dibaca.";
@@ -353,7 +380,12 @@ class Chatbot extends CI_Controller
                         'properties' => [
                             'keyword' => [
                                 'type' => 'string',
-                                'description' => 'Kata kunci nama pos atau lokasi, contoh: "Seturan", "AWLR Seturan", "Kali Meneng", "Banjarnegara"'
+                                'description' => 'Kata kunci nama pos atau lokasi, contoh: "Seturan", "Pejengkolan", "Kali Meneng"'
+                            ],
+                            'kategori' => [
+                                'type' => 'string',
+                                'enum' => ['aws', 'arr', 'awlr', 'klimatologi', 'afmr'],
+                                'description' => 'Opsional: filter berdasarkan kategori logger. Gunakan "aws" untuk cuaca, "arr" untuk hujan, "awlr" untuk TMA/debit.'
                             ]
                         ],
                         'required' => ['keyword']
@@ -457,8 +489,45 @@ class Chatbot extends CI_Controller
             [
                 'type' => 'function',
                 'function' => [
+                    'name' => 'get_data_ringkasan',
+                    'description' => 'Mendapatkan RINGKASAN (rata-rata, min, max, total) SEMUA parameter sensor dari satu logger. Mendukung 3 mode: (1) satu hari via tanggal, (2) range via start+end, (3) bulanan via bulan. GUNAKAN INI sebagai pilihan UTAMA saat user minta data historis. Bisa juga filter parameter tertentu saja (misal hanya curah hujan).',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id_logger' => [
+                                'type' => 'string',
+                                'description' => 'ID unik logger'
+                            ],
+                            'tanggal' => [
+                                'type' => 'string',
+                                'description' => 'Untuk data 1 hari (YYYY-MM-DD). Default: hari ini.'
+                            ],
+                            'start' => [
+                                'type' => 'string',
+                                'description' => 'Tanggal awal range (YYYY-MM-DD). Gunakan bersama end.'
+                            ],
+                            'end' => [
+                                'type' => 'string',
+                                'description' => 'Tanggal akhir range (YYYY-MM-DD). Gunakan bersama start.'
+                            ],
+                            'bulan' => [
+                                'type' => 'string',
+                                'description' => 'Untuk data 1 bulan (YYYY-MM). Contoh: 2026-02.'
+                            ],
+                            'parameter' => [
+                                'type' => 'string',
+                                'description' => 'Opsional: filter nama parameter. Contoh: "hujan", "suhu", "angin". Jika tidak diisi, semua parameter ditampilkan.'
+                            ]
+                        ],
+                        'required' => ['id_logger']
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
                     'name' => 'get_data_analisa',
-                    'description' => 'Mendapatkan data analisa historis dari satu sensor. Bisa per hari, per bulan, per tahun, atau range tanggal.',
+                    'description' => 'Mendapatkan data analisa historis DETAIL PER-JAM dari SATU sensor spesifik. HANYA gunakan jika user secara eksplisit minta data per-jam untuk satu parameter tertentu. Untuk ringkasan umum, gunakan get_data_ringkasan.',
                     'parameters' => [
                         'type' => 'object',
                         'properties' => [
@@ -538,6 +607,7 @@ class Chatbot extends CI_Controller
             'get_logger_parameter' => 'logger_parameter',
             'get_logger_koneksi' => 'logger_koneksi',
             'get_data_realtime' => 'data_realtime',
+            'get_data_ringkasan' => 'data_ringkasan',
             'get_data_analisa' => 'data_analisa',
             'get_data_komparasi' => 'data_komparasi',
         ];
@@ -604,6 +674,7 @@ class Chatbot extends CI_Controller
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_TIMEOUT => 60,
+            CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
                 'Authorization: Bearer ' . $api_key,
@@ -612,19 +683,24 @@ class Chatbot extends CI_Controller
         ]);
 
         $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
         curl_close($ch);
 
         if ($err) {
             log_message('error', 'OpenAI cURL error: ' . $err);
-            return null;
+            // Return error with detail so chat() can show it
+            return ['_error' => 'cURL error: ' . $err];
         }
+
+        log_message('debug', 'OpenAI HTTP ' . $http_code . ' response: ' . substr($response, 0, 500));
 
         $decoded = json_decode($response, true);
 
         if (isset($decoded['error'])) {
-            log_message('error', 'OpenAI API error: ' . json_encode($decoded['error']));
-            return null;
+            $err_msg = $decoded['error']['message'] ?? json_encode($decoded['error']);
+            log_message('error', 'OpenAI API error (HTTP ' . $http_code . '): ' . $err_msg);
+            return ['_error' => 'OpenAI: ' . $err_msg];
         }
 
         return $decoded;
@@ -785,38 +861,48 @@ class Chatbot extends CI_Controller
     {
         $input = $this->_json_input();
         $keyword = isset($input['keyword']) ? trim($input['keyword']) : '';
+        $kategori = isset($input['kategori']) ? strtolower(trim($input['kategori'])) : '';
 
         if ($keyword === '') {
             return $this->_json_response(['status' => 'error', 'message' => 'keyword wajib diisi']);
         }
 
-        // Normalize keyword
-        $kw_lower = strtolower($keyword);
-
         // Split keyword into parts for flexible matching
         // e.g. "AWLR Seturan" → ["awlr", "seturan"]
+        $kw_lower = strtolower($keyword);
         $parts = preg_split('/[\s_\-]+/', $kw_lower);
+        $parts = array_filter($parts, function ($p) {
+            return strlen($p) >= 2;
+        }); // skip very short words
 
-        // Build SQL LIKE conditions — match ANY part against nama_logger or nama_lokasi
-        $like_conditions = [];
-        foreach ($parts as $part) {
-            $part_escaped = $this->db->escape_like_str($part);
-            $like_conditions[] = "(LOWER(t_logger.nama_logger) LIKE '%{$part_escaped}%'
-                                   OR LOWER(t_lokasi.nama_lokasi) LIKE '%{$part_escaped}%')";
+        if (empty($parts)) {
+            $parts = [$kw_lower];
         }
-        $where_like = implode(' AND ', $like_conditions);
 
-        $sql = "SELECT t_logger.id_logger, t_logger.nama_logger, 
-                       t_lokasi.nama_lokasi, kategori_logger.nama_kategori,
-                       t_lokasi.latitude, t_lokasi.longitude
-                FROM t_logger
-                INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi
-                INNER JOIN kategori_logger ON t_logger.kategori_log = kategori_logger.id_katlogger
-                WHERE {$where_like}
-                ORDER BY t_logger.nama_logger ASC
-                LIMIT 10";
+        // Use CI Active Record for proper escaping
+        $this->db->select('t_logger.id_logger, t_logger.nama_logger, t_lokasi.nama_lokasi, kategori_logger.nama_kategori, t_lokasi.latitude, t_lokasi.longitude');
+        $this->db->from('t_logger');
+        $this->db->join('t_lokasi', 't_logger.lokasi_logger = t_lokasi.idlokasi', 'inner');
+        $this->db->join('kategori_logger', 't_logger.kategori_log = kategori_logger.id_katlogger', 'inner');
 
-        $query = $this->db->query($sql);
+        // Each keyword part must match either nama_logger OR nama_lokasi
+        foreach ($parts as $part) {
+            $this->db->group_start();
+            $this->db->like('t_logger.nama_logger', $part, 'both');
+            $this->db->or_like('t_lokasi.nama_lokasi', $part, 'both');
+            $this->db->or_like('kategori_logger.nama_kategori', $part, 'both');
+            $this->db->group_end();
+        }
+
+        // Category filter
+        if ($kategori !== '') {
+            $this->db->like('kategori_logger.nama_kategori', $kategori, 'both');
+        }
+
+        $this->db->order_by('t_logger.nama_logger', 'ASC');
+        $this->db->limit(15);
+
+        $query = $this->db->get();
         $results = $query->result();
 
         // Score results using similar_text for ranking
@@ -843,10 +929,73 @@ class Chatbot extends CI_Controller
             ];
         }
 
+        // ── PSDA integration: search PSDA loggers too ──
+        $psda_endpoints = [
+            ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=8&tabel=temp_awlr', 'kategori' => 'AWLR (PSDA)'],
+            ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=1&tabel=temp_weather_station', 'kategori' => 'AWS (PSDA)'],
+            ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=2&tabel=temp_weather_station', 'kategori' => 'ARR (PSDA)'],
+        ];
+
+        // Collect existing local IDs to avoid duplicates
+        $local_ids = array_column($scored, 'id_logger');
+
+        foreach ($psda_endpoints as $ep) {
+            // Skip if kategori filter doesn't match
+            if ($kategori !== '' && stripos($ep['kategori'], $kategori) === false) {
+                continue;
+            }
+
+            $psda = @json_decode(@file_get_contents($ep['url']), true);
+            if (empty($psda['lokasi']))
+                continue;
+
+            foreach ($psda['lokasi'] as $p) {
+                $pid = $p['logger_id'] ?? $p['id_logger'] ?? '';
+                // Skip if already in local results
+                if (in_array($pid, $local_ids))
+                    continue;
+
+                $nama = $p['nama_logger'] ?? '';
+                $lokasi = $p['lokasi'] ?? $p['nama_lokasi'] ?? '';
+                $combined_psda = strtolower($ep['kategori'] . ' ' . $nama . ' ' . $lokasi);
+
+                // Check if any keyword part matches
+                $match = false;
+                foreach ($parts as $part) {
+                    if (stripos($nama, $part) !== false || stripos($lokasi, $part) !== false) {
+                        $match = true;
+                        break;
+                    }
+                }
+                if (!$match)
+                    continue;
+
+                similar_text($kw_lower, $combined_psda, $pct);
+                $bonus = 0;
+                if (stripos($nama, $keyword) !== false)
+                    $bonus += 30;
+                if (stripos($lokasi, $keyword) !== false)
+                    $bonus += 20;
+
+                $scored[] = [
+                    'id_logger' => $pid,
+                    'nama_logger' => $nama,
+                    'lokasi' => $lokasi,
+                    'kategori' => $ep['kategori'],
+                    'latitude' => $p['latitude'] ?? '',
+                    'longitude' => $p['longitude'] ?? '',
+                    'relevance' => round($pct + $bonus, 1)
+                ];
+            }
+        }
+
         // Sort by relevance descending
         usort($scored, function ($a, $b) {
             return $b['relevance'] <=> $a['relevance'];
         });
+
+        // Limit results
+        $scored = array_slice($scored, 0, 15);
 
         $this->_json_response([
             'status' => 'sukses',
@@ -996,16 +1145,27 @@ class Chatbot extends CI_Controller
             }
         }
 
-        // PSDA fallback — merge jika kategori tertentu
+        // PSDA fallback — merge all PSDA categories (matching Api.php pattern)
+        $psda_sources = [];
         if ($kategori === '2' || $kategori === 'all') {
-            $psda = @json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=8&tabel=temp_awlr'), true);
+            $psda_sources[] = ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=8&tabel=temp_awlr', 'kategori' => 'AWLR (PSDA)'];
+        }
+        if ($kategori === '6' || $kategori === 'all') {
+            $psda_sources[] = ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=1&tabel=temp_weather_station', 'kategori' => 'AWS (PSDA)'];
+        }
+        if ($kategori === '7' || $kategori === 'all') {
+            $psda_sources[] = ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=2&tabel=temp_weather_station', 'kategori' => 'ARR (PSDA)'];
+        }
+
+        foreach ($psda_sources as $src) {
+            $psda = @json_decode(file_get_contents($src['url']), true);
             if (!empty($psda['lokasi'])) {
                 foreach ($psda['lokasi'] as $p) {
                     $data[] = [
                         'id_logger' => $p['logger_id'] ?? $p['id_logger'] ?? '',
                         'nama_logger' => $p['nama_logger'] ?? '',
                         'lokasi' => $p['lokasi'] ?? $p['nama_lokasi'] ?? '',
-                        'kategori' => 'AWLR (PSDA)',
+                        'kategori' => $src['kategori'],
                         'latitude' => $p['latitude'] ?? '',
                         'longitude' => $p['longitude'] ?? '',
                         'koneksi' => $p['status'] ?? $p['koneksi_log'] ?? '',
@@ -1158,6 +1318,273 @@ class Chatbot extends CI_Controller
                 'waktu_terakhir' => $waktu,
                 'is_perbaikan' => false
             ]
+        ]);
+    }
+
+    // ═══════════════════════════════════════════
+    // 4b) data_ringkasan — ringkasan SEMUA parameter dalam 1 call
+    //     Supports: tanggal (1 hari), start+end (range), bulan (YYYY-MM)
+    // ═══════════════════════════════════════════
+    public function data_ringkasan()
+    {
+        $input = $this->_json_input();
+        $id_logger = isset($input['id_logger']) ? $input['id_logger'] : null;
+        $tanggal = isset($input['tanggal']) ? $input['tanggal'] : null;
+        $start = isset($input['start']) ? $input['start'] : null;
+        $end = isset($input['end']) ? $input['end'] : null;
+        $bulan = isset($input['bulan']) ? $input['bulan'] : null;
+        // Optional: filter by specific parameter name(s)
+        $filter_param = isset($input['parameter']) ? $input['parameter'] : null;
+
+        if (!$id_logger) {
+            return $this->_json_response(['status' => 'error', 'message' => 'id_logger wajib diisi']);
+        }
+
+        // Determine date mode
+        if ($bulan) {
+            // Monthly mode: YYYY-MM → generate start/end
+            $start = $bulan . '-01';
+            $end = date('Y-m-t', strtotime($start)); // last day of month
+            $mode = 'bulanan';
+        } elseif ($start && $end) {
+            $mode = 'range';
+        } elseif ($tanggal) {
+            $start = $tanggal;
+            $end = $tanggal;
+            $mode = 'harian';
+        } else {
+            // Default: hari ini
+            $start = date('Y-m-d');
+            $end = date('Y-m-d');
+            $mode = 'harian';
+        }
+
+        // Safety: max 31 days
+        $date_diff = (strtotime($end) - strtotime($start)) / 86400;
+        if ($date_diff > 31) {
+            return $this->_json_response(['status' => 'error', 'message' => 'Range maksimal 31 hari. Gunakan bulan untuk data per bulan.']);
+        }
+
+        // Ambil info logger
+        $logger = $this->db
+            ->join('kategori_logger', 'kategori_logger.id_katlogger = t_logger.kategori_log')
+            ->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
+            ->where('t_logger.id_logger', $id_logger)
+            ->get('t_logger')->row();
+
+        if (!$logger) {
+            return $this->_json_response(['status' => 'error', 'message' => 'Logger tidak ditemukan']);
+        }
+
+        // Ambil semua parameter sensor
+        $params = $this->db->where('logger_id', $id_logger)->get('parameter_sensor')->result();
+        if (empty($params)) {
+            return $this->_json_response(['status' => 'error', 'message' => 'Tidak ada parameter sensor']);
+        }
+
+        $tabel_main = $logger->tabel_main;
+        $is_hujan_logger = ($logger->controller == 'arr' || $logger->controller == 'awr');
+
+        // Filter parameters if specified
+        if ($filter_param) {
+            // Synonym map: Indonesian ↔ English parameter names
+            $synonyms = [
+                'hujan' => ['precipitation', 'rain', 'rainfall', 'curah'],
+                'precipitation' => ['hujan', 'rain', 'rainfall', 'curah'],
+                'rain' => ['hujan', 'precipitation', 'rainfall', 'curah'],
+                'curah' => ['hujan', 'precipitation', 'rain', 'rainfall'],
+                'suhu' => ['temperature', 'temp'],
+                'temperature' => ['suhu', 'temp'],
+                'angin' => ['wind', 'speed'],
+                'wind' => ['angin'],
+                'kelembapan' => ['humidity', 'rh', 'kelembaban'],
+                'humidity' => ['kelembapan', 'rh', 'kelembaban'],
+                'tekanan' => ['pressure', 'barometer'],
+                'pressure' => ['tekanan', 'barometer'],
+                'radiasi' => ['solar', 'radiation', 'matahari'],
+                'solar' => ['radiasi', 'matahari'],
+                'uv' => ['ultraviolet'],
+                'debit' => ['flow', 'discharge'],
+                'tma' => ['water', 'level', 'tinggi', 'muka', 'air'],
+            ];
+
+            // Split filter into words, then expand with synonyms
+            $filter_words = array_filter(
+                explode(' ', strtolower(str_replace('_', ' ', $filter_param))),
+                function ($w) {
+                    return strlen($w) >= 2;
+                }
+            );
+
+            // Add synonyms for each word
+            $expanded = $filter_words;
+            foreach ($filter_words as $word) {
+                if (isset($synonyms[$word])) {
+                    $expanded = array_merge($expanded, $synonyms[$word]);
+                }
+            }
+            $expanded = array_unique($expanded);
+
+            error_log("[RINGKASAN-FILTER] filter='{$filter_param}' words=" . implode(',', $filter_words) . " expanded=" . implode(',', $expanded));
+
+            // Log all parameter names for debugging
+            foreach ($params as $p) {
+                error_log("[RINGKASAN-PARAM] nama={$p->nama_parameter} tipe_graf={$p->tipe_graf} satuan={$p->satuan}");
+            }
+
+            if (!empty($expanded)) {
+                $params = array_filter($params, function ($p) use ($expanded) {
+                    $nama_lower = strtolower(str_replace('_', ' ', $p->nama_parameter));
+                    $satuan_lower = strtolower($p->satuan);
+                    foreach ($expanded as $word) {
+                        if (stripos($nama_lower, $word) !== false || stripos($satuan_lower, $word) !== false) {
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+            }
+            error_log("[RINGKASAN-FILTER] matched=" . count($params) . " params");
+        }
+
+        // Single day mode → compact all-parameter summary
+        if ($start === $end) {
+            $ringkasan = [];
+            foreach ($params as $p) {
+                $kolom = $p->kolom_sensor;
+                $nama = $p->nama_parameter;
+                $is_column = ($p->tipe_graf == 'column');
+
+                $sql = "SELECT
+                            COUNT({$kolom}) as jml,
+                            ROUND(AVG({$kolom}), 2) as avg_val,
+                            ROUND(MIN({$kolom}), 2) as min_val,
+                            ROUND(MAX({$kolom}), 2) as max_val,
+                            ROUND(SUM({$kolom}), 2) as sum_val
+                        FROM {$tabel_main}
+                        WHERE code_logger = ?
+                          AND waktu >= '{$start} 00:00'
+                          AND waktu <= '{$start} 23:59'";
+
+                $row = $this->db->query($sql, [$id_logger])->row();
+                error_log("[RINGKASAN-SINGLE] tabel={$tabel_main} kolom={$kolom} tipe_graf={$p->tipe_graf} is_column=" . ($is_column ? 'Y' : 'N') . " jml=" . ($row->jml ?? 0) . " sum=" . ($row->sum_val ?? 'null') . " avg=" . ($row->avg_val ?? 'null'));
+                if (!$row || $row->jml == 0)
+                    continue;
+
+                $item = [
+                    'parameter' => str_replace('_', ' ', $nama),
+                    'satuan' => $p->satuan,
+                ];
+
+                if ($is_column) {
+                    $item['total'] = $row->sum_val;
+                    $item['max_per_jam'] = $row->max_val;
+                    $item['klasifikasi_harian'] = $this->_klasifikasi_hujan_harian($row->sum_val);
+                } else {
+                    $item['rata_rata'] = $row->avg_val;
+                    $item['minimum'] = $row->min_val;
+                    $item['maximum'] = $row->max_val;
+                }
+
+                $ringkasan[] = $item;
+            }
+
+            return $this->_json_response([
+                'status' => 'sukses',
+                'id_logger' => $id_logger,
+                'nama' => $logger->nama_logger,
+                'lokasi' => $logger->nama_lokasi,
+                'kategori' => $logger->nama_kategori,
+                'mode' => $mode,
+                'tanggal' => $start,
+                'total_parameter' => count($ringkasan),
+                'ringkasan' => $ringkasan
+            ]);
+        }
+
+        // Multi-day mode → per-day summary per parameter (compact table)
+        // Generate list of dates
+        $dates = [];
+        $cur = $start;
+        while ($cur <= $end) {
+            $dates[] = $cur;
+            $cur = date('Y-m-d', strtotime($cur . ' +1 day'));
+        }
+
+        $ringkasan = [];
+        foreach ($params as $p) {
+            $kolom = $p->kolom_sensor;
+            $nama = $p->nama_parameter;
+            $is_column = ($p->tipe_graf == 'column');
+
+            // Query per-day aggregation in 1 SQL — matching Api.php's GROUP BY pattern
+            $sql = "SELECT
+                        DATE(waktu) as tgl,
+                        COUNT({$kolom}) as jml,
+                        ROUND(AVG({$kolom}), 2) as avg_val,
+                        ROUND(MIN({$kolom}), 2) as min_val,
+                        ROUND(MAX({$kolom}), 2) as max_val,
+                        ROUND(SUM({$kolom}), 2) as sum_val
+                    FROM {$tabel_main}
+                    WHERE code_logger = ?
+                      AND waktu >= '{$start} 00:00'
+                      AND waktu <= '{$end} 23:59'
+                    GROUP BY DAY(waktu), MONTH(waktu), YEAR(waktu)
+                    ORDER BY waktu ASC";
+
+            $rows = $this->db->query($sql, [$id_logger])->result();
+            error_log("[RINGKASAN-RANGE] tabel={$tabel_main} kolom={$kolom} param={$nama} tipe_graf={$p->tipe_graf} is_column=" . ($is_column ? 'Y' : 'N') . " rows=" . count($rows));
+            if (empty($rows))
+                continue;
+
+            // Build daily data indexed by date
+            $daily_map = [];
+            foreach ($rows as $r) {
+                $daily_map[$r->tgl] = $r;
+            }
+
+            $daily_data = [];
+            foreach ($dates as $d) {
+                if (isset($daily_map[$d])) {
+                    $r = $daily_map[$d];
+                    if ($is_column) {
+                        $daily_data[] = [
+                            'tanggal' => $d,
+                            'total' => $r->sum_val,
+                            'max_per_jam' => $r->max_val,
+                            'klasifikasi' => $this->_klasifikasi_hujan_harian($r->sum_val),
+                        ];
+                    } else {
+                        $daily_data[] = [
+                            'tanggal' => $d,
+                            'rata_rata' => $r->avg_val,
+                            'minimum' => $r->min_val,
+                            'maximum' => $r->max_val,
+                        ];
+                    }
+                } else {
+                    $daily_data[] = ['tanggal' => $d, 'data' => 'tidak tersedia'];
+                }
+            }
+
+            $ringkasan[] = [
+                'parameter' => str_replace('_', ' ', $nama),
+                'satuan' => $p->satuan,
+                'harian' => $daily_data,
+            ];
+        }
+
+        $this->_json_response([
+            'status' => 'sukses',
+            'id_logger' => $id_logger,
+            'nama' => $logger->nama_logger,
+            'lokasi' => $logger->nama_lokasi,
+            'kategori' => $logger->nama_kategori,
+            'mode' => $mode,
+            'periode' => $start . ' s/d ' . $end,
+            'jumlah_hari' => count($dates),
+            'total_parameter' => count($ringkasan),
+            'ringkasan' => $ringkasan
         ]);
     }
 
