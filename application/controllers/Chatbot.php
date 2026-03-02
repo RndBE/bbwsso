@@ -188,6 +188,7 @@ class Chatbot extends CI_Controller
     /**
      * Trim messages to stay within token budget.
      * Keeps: system prompt (index 0) + last $max messages.
+     * Ensures tool_calls/tool response pairs are never split.
      */
     private function _trim_messages($messages, $max = 40)
     {
@@ -196,7 +197,29 @@ class Chatbot extends CI_Controller
         }
 
         $system = [$messages[0]]; // always keep system prompt
-        $tail = array_slice($messages, -$max);
+
+        // Start from where we'd normally cut
+        $cut_start = count($messages) - $max;
+        if ($cut_start < 1)
+            $cut_start = 1;
+
+        // Scan forward to find a safe cut point (a 'user' or 'system' message)
+        // Avoid cutting in the middle of tool_calls → tool response sequences
+        for ($i = $cut_start; $i < count($messages); $i++) {
+            $role = $messages[$i]['role'] ?? '';
+            // Safe to start from 'user' or 'assistant' without tool_calls
+            if ($role === 'user') {
+                $cut_start = $i;
+                break;
+            }
+            // Also safe if it's an assistant message WITHOUT tool_calls
+            if ($role === 'assistant' && empty($messages[$i]['tool_calls'])) {
+                $cut_start = $i;
+                break;
+            }
+        }
+
+        $tail = array_slice($messages, $cut_start);
 
         return array_merge($system, $tail);
     }
@@ -299,6 +322,7 @@ class Chatbot extends CI_Controller
             . "- Jika user tanya 'cuaca 7 hari terakhir' TANPA menyebut pos → TANYAKAN pos mana yang dimaksud. Jangan loop semua pos.\n"
             . "- Jika user tanya tentang cuaca umum → gunakan search_logger(keyword='aws') untuk cari pos AWS, lalu tanyakan pos mana.\n"
             . "- Jika user tanya tentang hujan di suatu wilayah → gunakan cek_hujan untuk status live, atau gunakan search_logger(keyword='arr') untuk cari pos ARR/AWS.\n"
+            . "- Jika user tanya tentang CURAH HUJAN HISTORIS di SEMUA pos pada tanggal tertentu → gunakan cek_hujan_historis.\n"
             . "- Jika user tanya tentang TMA/debit → gunakan search_logger(keyword='awlr') untuk cari pos AWLR.\n"
             . "- JANGAN PERNAH loop panggil get_data_ringkasan untuk semua pos → token akan habis!\n\n"
             . "Konteks waktu saat ini:\n"
@@ -313,7 +337,8 @@ class Chatbot extends CI_Controller
             . "- PENTING: Jika pengguna menyebut NAMA pos/lokasi (bukan ID angka), SELALU gunakan search_logger TERLEBIH DAHULU.\n"
             . "- PENTING: Jika pengguna menyebut referensi WAKTU/TANGGAL, SELALU gunakan resolve_date.\n"
             . "- cek_hujan HANYA untuk kondisi hujan SAAT INI / LIVE. JANGAN gunakan cek_hujan untuk data historis!\n"
-            . "- Untuk data curah hujan HISTORIS → HARUS gunakan get_data_ringkasan dengan parameter='hujan'.\n"
+            . "- Untuk data curah hujan HISTORIS di SEMUA pos pada tanggal tertentu → HARUS gunakan cek_hujan_historis.\n"
+            . "- Untuk data curah hujan HISTORIS di 1 POS tertentu → gunakan get_data_ringkasan dengan parameter='hujan'.\n"
             . "- PENTING STRATEGI DATA HISTORIS:\n"
             . "  * Untuk semua data historis, SELALU gunakan get_data_ringkasan sebagai pilihan UTAMA.\n"
             . "  * Mode 1 hari: set tanggal='YYYY-MM-DD'.\n"
@@ -339,17 +364,39 @@ class Chatbot extends CI_Controller
                 'type' => 'function',
                 'function' => [
                     'name' => 'cek_hujan',
-                    'description' => 'Mengecek kondisi hujan/curah hujan saat ini di semua pos ARR dan AWS. Mengembalikan ringkasan dan detail pos yang mengalami hujan beserta klasifikasi per jam dan per hari. Gunakan ini jika pengguna bertanya tentang hujan, cuaca, curah hujan, atau pos mana yang sedang hujan.',
+                    'description' => 'Mengecek kondisi hujan/curah hujan SAAT INI (LIVE/REALTIME) di semua pos ARR dan AWS. JANGAN gunakan untuk data historis! Gunakan cek_hujan_historis untuk data tanggal tertentu.',
                     'parameters' => [
                         'type' => 'object',
                         'properties' => [
                             'filter' => [
                                 'type' => 'string',
                                 'enum' => ['hujan_saja', 'semua'],
-                                'description' => 'Filter hasil: "hujan_saja" (default) hanya pos yang hujan, "semua" tampilkan semua pos termasuk yang tidak hujan'
+                                'description' => 'Filter hasil: "hujan_saja" (default) hanya pos yang hujan, "semua" tampilkan semua pos'
                             ]
                         ],
                         'required' => []
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'cek_hujan_historis',
+                    'description' => 'Mengecek data curah hujan HISTORIS di semua pos ARR dan AWS pada tanggal tertentu. Mengembalikan akumulasi curah hujan harian dan klasifikasi untuk setiap pos. Gunakan jika pengguna bertanya hujan pada tanggal tertentu, misalnya "hujan kemarin", "curah hujan tanggal 28 Feb", "tampilkan curah hujan di seluruh pos tanggal X".',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'tanggal' => [
+                                'type' => 'string',
+                                'description' => 'Tanggal yang ingin dicek dalam format YYYY-MM-DD, contoh: "2026-02-28"'
+                            ],
+                            'filter' => [
+                                'type' => 'string',
+                                'enum' => ['hujan_saja', 'semua'],
+                                'description' => 'Filter hasil: "hujan_saja" (default) hanya pos yang hujan, "semua" tampilkan semua pos'
+                            ]
+                        ],
+                        'required' => ['tanggal']
                     ]
                 ]
             ],
@@ -600,6 +647,7 @@ class Chatbot extends CI_Controller
         // Map tool names to internal methods and their expected input
         $map = [
             'cek_hujan' => 'cek_hujan',
+            'cek_hujan_historis' => 'cek_hujan_historis',
             'resolve_date' => 'resolve_date',
             'search_logger' => 'search_logger',
             'get_logger_list' => 'logger_list',
@@ -816,6 +864,97 @@ class Chatbot extends CI_Controller
             }
         }
 
+        // ── Merge rain data from logger_mapping.json ──
+        $mapping = $this->_load_logger_mapping();
+        $local_ids = [];
+        foreach ($pos_hujan as $ph) {
+            $local_ids[] = $ph['id_logger'];
+        }
+        // Also collect IDs from local DB loop (even non-rain pos)
+        $query_local_ids = $this->db->query("SELECT id_logger FROM t_logger");
+        foreach ($query_local_ids->result() as $r) {
+            $local_ids[] = $r->id_logger;
+        }
+
+        foreach ($mapping as $cat) {
+            // Only AWS and ARR categories have rain data
+            if (!in_array($cat['nama_kategori'], ['AWS', 'ARR']))
+                continue;
+            $cat_name = $cat['nama_kategori'];
+
+            foreach ($cat['logger'] as $l) {
+                $lid = $l['id_logger'] ?? '';
+                if (in_array($lid, $local_ids))
+                    continue;
+
+                $total_pos++;
+                $is_psda = !empty($l['status_aset']);
+                $kat_label = $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)');
+                $status = $l['status_logger'] ?? '';
+                $waktu = $l['waktu'] ?? null;
+
+                // Check status
+                if (stripos($status, 'Perbaikan') !== false) {
+                    $pos_perbaikan++;
+                    continue;
+                }
+
+                $kn = $this->_cek_koneksi($waktu);
+                if (stripos($status, 'Terputus') !== false) {
+                    $kn = 'Off';
+                }
+                if ($kn !== 'On') {
+                    $pos_offline++;
+                    continue;
+                }
+
+                // Find rain parameter in mapping params
+                $rain_val = 0;
+                if (!empty($l['param'])) {
+                    foreach ($l['param'] as $p) {
+                        $pname = strtolower($p['nama_parameter'] ?? $p['alias_sensor'] ?? '');
+                        if (strpos($pname, 'curah_hujan') !== false || strpos($pname, 'rainfall') !== false) {
+                            $v = floatval($p['nilai'] ?? 0);
+                            if ($v > $rain_val)
+                                $rain_val = $v;
+                        }
+                    }
+                }
+
+                $klas_jam = $this->_klasifikasi_hujan_jam($rain_val);
+                $is_hujan = ($rain_val > 0);
+
+                if ($is_hujan) {
+                    $pos_hujan[] = [
+                        'id_logger' => $lid,
+                        'nama_logger' => $l['nama_logger'] ?? $l['nama_lokasi'] ?? '',
+                        'lokasi' => $l['nama_lokasi'] ?? '',
+                        'kategori' => $kat_label,
+                        'curah_hujan_jam' => number_format($rain_val, 2, '.', ''),
+                        'klasifikasi_jam' => $klas_jam,
+                        'curah_hujan_harian' => number_format($rain_val, 2, '.', ''),
+                        'klasifikasi_harian' => $this->_klasifikasi_hujan_harian($rain_val),
+                        'waktu_terakhir' => $waktu
+                    ];
+                } else {
+                    if ($filter === 'semua') {
+                        $pos_hujan[] = [
+                            'id_logger' => $lid,
+                            'nama_logger' => $l['nama_logger'] ?? $l['nama_lokasi'] ?? '',
+                            'lokasi' => $l['nama_lokasi'] ?? '',
+                            'kategori' => $kat_label,
+                            'curah_hujan_jam' => '0.00',
+                            'klasifikasi_jam' => $klas_jam,
+                            'curah_hujan_harian' => '0.00',
+                            'klasifikasi_harian' => 'Berawan / Tidak Hujan',
+                            'waktu_terakhir' => $waktu
+                        ];
+                    }
+                    $pos_tidak_hujan++;
+                }
+            }
+        }
+
         // Sort by heaviest rain first
         usort($pos_hujan, function ($a, $b) {
             return (float) $b['curah_hujan_jam'] <=> (float) $a['curah_hujan_jam'];
@@ -835,6 +974,138 @@ class Chatbot extends CI_Controller
             'pos_offline' => $pos_offline,
             'pos_perbaikan' => $pos_perbaikan,
             'data' => $pos_hujan
+        ]);
+    }
+
+    // ═══════════════════════════════════════════
+    // CEK HUJAN HISTORIS — historical rainfall across all stations
+    // ═══════════════════════════════════════════
+    public function cek_hujan_historis()
+    {
+        $input = $this->_json_input();
+        $tanggal = isset($input['tanggal']) ? $input['tanggal'] : null;
+        $filter = isset($input['filter']) ? $input['filter'] : 'hujan_saja';
+
+        if (!$tanggal) {
+            return $this->_json_response(['status' => 'error', 'message' => 'tanggal wajib diisi (format: YYYY-MM-DD)']);
+        }
+
+        $pos_data = [];
+        $total_pos = 0;
+
+        // ── 1) Query local BBWS loggers (ARR & AWS) ──
+        $query_kat = $this->db->query(
+            "SELECT * FROM kategori_logger WHERE view = 1 AND (controller = 'awr' OR controller = 'arr')"
+        );
+
+        $local_ids = [];
+        foreach ($query_kat->result() as $kat) {
+            $query_logger = $this->db->query("
+                SELECT t_logger.*, t_lokasi.nama_lokasi, t_lokasi.latitude, t_lokasi.longitude
+                FROM t_logger
+                INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi
+                WHERE kategori_log = '{$kat->id_katlogger}'
+            ");
+
+            foreach ($query_logger->result() as $lok) {
+                $total_pos++;
+                $id_logger = $lok->id_logger;
+                $local_ids[] = $id_logger;
+                $tabel_main = $lok->tabel_main;
+
+                // Get primary rainfall sensor
+                $p_utama = $this->db
+                    ->where('logger_id', $id_logger)
+                    ->where('parameter_utama', '1')
+                    ->get('parameter_sensor')
+                    ->row();
+
+                if (!$p_utama)
+                    continue;
+
+                $kolom = $p_utama->kolom_sensor;
+
+                // Daily accumulation for the given date
+                $akum = $this->db->query(
+                    "SELECT SUM({$kolom}) as val FROM {$tabel_main} WHERE code_logger = '{$id_logger}' AND waktu >= '{$tanggal} 00:00' AND waktu <= '{$tanggal} 23:59'"
+                )->row();
+                $val = floatval($akum->val ?? 0);
+
+                $klas = $this->_klasifikasi_hujan_harian($val);
+                $is_hujan = ($val > 0);
+
+                if ($is_hujan || $filter === 'semua') {
+                    $pos_data[] = [
+                        'pos' => $lok->nama_logger,
+                        'mm' => number_format($val, 2, '.', ''),
+                        'klasifikasi' => $klas
+                    ];
+                }
+            }
+        }
+
+        // ── 2) Query PSDA loggers from mapping via PSDA API ──
+        $mapping = $this->_load_logger_mapping();
+        foreach ($mapping as $cat) {
+            if (!in_array($cat['nama_kategori'], ['AWS', 'ARR']))
+                continue;
+            $cat_name = $cat['nama_kategori'];
+            $temp_tabel = $cat['temp_data'];
+
+            foreach ($cat['logger'] as $l) {
+                $lid = $l['id_logger'] ?? '';
+                if (in_array($lid, $local_ids))
+                    continue;
+                if (empty($l['status_aset']))
+                    continue; // only PSDA loggers not already in local
+
+                $total_pos++;
+
+                // Call PSDA analysis API for this date
+                $tbl = $l['temp_tabel'] ?? $temp_tabel;
+                $url = "https://dpupesdm.monitoring4system.com/api/analisapertanggal2"
+                    . "?idlogger={$lid}&tanggal={$tanggal}&tabel={$tbl}";
+                $psda = @json_decode(@file_get_contents($url), true);
+
+                $val = 0;
+                if (!empty($psda['data'])) {
+                    // Sum all rain values from the day data
+                    foreach ($psda['data'] as $row) {
+                        // Look for rain column (sensor1 is typically rain for ARR)
+                        $rain = floatval($row['sensor1'] ?? $row['curah_hujan'] ?? 0);
+                        $val += $rain;
+                    }
+                }
+
+                $klas = $this->_klasifikasi_hujan_harian($val);
+                $is_hujan = ($val > 0);
+
+                if ($is_hujan || $filter === 'semua') {
+                    $pos_data[] = [
+                        'pos' => $l['nama_logger'] ?? $l['nama_lokasi'] ?? '',
+                        'mm' => number_format($val, 2, '.', ''),
+                        'klasifikasi' => $klas
+                    ];
+                }
+            }
+        }
+
+        // Sort by heaviest rain first
+        usort($pos_data, function ($a, $b) {
+            return (float) $b['mm'] <=> (float) $a['mm'];
+        });
+
+        $jml_hujan = count(array_filter($pos_data, function ($p) {
+            return (float) $p['mm'] > 0;
+        }));
+
+        $this->_json_response([
+            'status' => 'sukses',
+            'tanggal' => $tanggal,
+            'ringkasan' => "{$jml_hujan} dari {$total_pos} pos mendeteksi hujan pada tanggal {$tanggal}",
+            'total_pos' => $total_pos,
+            'pos_hujan' => $jml_hujan,
+            'data' => $pos_data
         ]);
     }
 
@@ -929,35 +1200,27 @@ class Chatbot extends CI_Controller
             ];
         }
 
-        // ── PSDA integration: search PSDA loggers too ──
-        $psda_endpoints = [
-            ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=8&tabel=temp_awlr', 'kategori' => 'AWLR (PSDA)'],
-            ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=1&tabel=temp_weather_station', 'kategori' => 'AWS (PSDA)'],
-            ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=2&tabel=temp_weather_station', 'kategori' => 'ARR (PSDA)'],
-        ];
-
-        // Collect existing local IDs to avoid duplicates
+        // ── Integration: search logger_mapping.json too ──
         $local_ids = array_column($scored, 'id_logger');
-
-        foreach ($psda_endpoints as $ep) {
+        $mapping = $this->_load_logger_mapping();
+        foreach ($mapping as $cat) {
+            $cat_name = $cat['nama_kategori'];
             // Skip if kategori filter doesn't match
-            if ($kategori !== '' && stripos($ep['kategori'], $kategori) === false) {
+            if ($kategori !== '' && stripos($cat_name, $kategori) === false) {
                 continue;
             }
 
-            $psda = @json_decode(@file_get_contents($ep['url']), true);
-            if (empty($psda['lokasi']))
-                continue;
-
-            foreach ($psda['lokasi'] as $p) {
-                $pid = $p['logger_id'] ?? $p['id_logger'] ?? '';
+            foreach ($cat['logger'] as $l) {
+                $lid = $l['id_logger'] ?? '';
                 // Skip if already in local results
-                if (in_array($pid, $local_ids))
+                if (in_array($lid, $local_ids))
                     continue;
 
-                $nama = $p['nama_logger'] ?? '';
-                $lokasi = $p['lokasi'] ?? $p['nama_lokasi'] ?? '';
-                $combined_psda = strtolower($ep['kategori'] . ' ' . $nama . ' ' . $lokasi);
+                $nama = $l['nama_logger'] ?? $l['nama_lokasi'] ?? '';
+                $lokasi = $l['nama_lokasi'] ?? '';
+                $is_psda = !empty($l['status_aset']);
+                $kat_label = $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)');
+                $combined_map = strtolower($kat_label . ' ' . $nama . ' ' . $lokasi);
 
                 // Check if any keyword part matches
                 $match = false;
@@ -970,7 +1233,7 @@ class Chatbot extends CI_Controller
                 if (!$match)
                     continue;
 
-                similar_text($kw_lower, $combined_psda, $pct);
+                similar_text($kw_lower, $combined_map, $pct);
                 $bonus = 0;
                 if (stripos($nama, $keyword) !== false)
                     $bonus += 30;
@@ -978,12 +1241,12 @@ class Chatbot extends CI_Controller
                     $bonus += 20;
 
                 $scored[] = [
-                    'id_logger' => $pid,
+                    'id_logger' => $lid,
                     'nama_logger' => $nama,
                     'lokasi' => $lokasi,
-                    'kategori' => $ep['kategori'],
-                    'latitude' => $p['latitude'] ?? '',
-                    'longitude' => $p['longitude'] ?? '',
+                    'kategori' => $kat_label,
+                    'latitude' => $l['latitude'] ?? '',
+                    'longitude' => $l['longitude'] ?? '',
                     'relevance' => round($pct + $bonus, 1)
                 ];
             }
@@ -1145,34 +1408,55 @@ class Chatbot extends CI_Controller
             }
         }
 
-        // PSDA fallback — merge all PSDA categories (matching Api.php pattern)
-        $psda_sources = [];
-        if ($kategori === '2' || $kategori === 'all') {
-            $psda_sources[] = ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=8&tabel=temp_awlr', 'kategori' => 'AWLR (PSDA)'];
-        }
-        if ($kategori === '6' || $kategori === 'all') {
-            $psda_sources[] = ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=1&tabel=temp_weather_station', 'kategori' => 'AWS (PSDA)'];
-        }
-        if ($kategori === '7' || $kategori === 'all') {
-            $psda_sources[] = ['url' => 'https://dpupesdm.monitoring4system.com/api/lokasi_baru?kategori_log=2&tabel=temp_weather_station', 'kategori' => 'ARR (PSDA)'];
-        }
+        // ── Merge loggers from logger_mapping.json ──
+        $mapping = $this->_load_logger_mapping();
+        $local_ids = array_column($data, 'id_logger');
 
-        foreach ($psda_sources as $src) {
-            $psda = @json_decode(file_get_contents($src['url']), true);
-            if (!empty($psda['lokasi'])) {
-                foreach ($psda['lokasi'] as $p) {
-                    $data[] = [
-                        'id_logger' => $p['logger_id'] ?? $p['id_logger'] ?? '',
-                        'nama_logger' => $p['nama_logger'] ?? '',
-                        'lokasi' => $p['lokasi'] ?? $p['nama_lokasi'] ?? '',
-                        'kategori' => $src['kategori'],
-                        'latitude' => $p['latitude'] ?? '',
-                        'longitude' => $p['longitude'] ?? '',
-                        'koneksi' => $p['status'] ?? $p['koneksi_log'] ?? '',
-                        'keterangan_koneksi' => $p['koneksi'] ?? '',
-                        'waktu_terakhir' => $p['waktu'] ?? null
-                    ];
+        foreach ($mapping as $cat) {
+            $cat_name = $cat['nama_kategori'];
+
+            // Category filter check
+            if ($kategori !== 'all' && (string) $cat['id_katlogger'] !== (string) $kategori) {
+                continue;
+            }
+
+            foreach ($cat['logger'] as $l) {
+                $lid = $l['id_logger'] ?? '';
+                // Skip duplicates already from local DB
+                if (in_array($lid, $local_ids))
+                    continue;
+
+                $is_psda = !empty($l['status_aset']);
+                $kat_label = $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)');
+                $status = $l['status_logger'] ?? '';
+                $waktu = $l['waktu'] ?? null;
+                $kn = $this->_cek_koneksi($waktu);
+
+                // Use status from mapping if available
+                if (stripos($status, 'Perbaikan') !== false) {
+                    $kn_label = 'Sedang Perbaikan';
+                    $kn = 'perbaikan';
+                } elseif (stripos($status, 'Terhubung') !== false) {
+                    $kn_label = 'Koneksi Terhubung';
+                    $kn = 'On';
+                } elseif (stripos($status, 'Terputus') !== false) {
+                    $kn_label = 'Koneksi Terputus';
+                    $kn = 'Off';
+                } else {
+                    $kn_label = ($kn === 'On') ? 'Koneksi Terhubung' : 'Koneksi Terputus';
                 }
+
+                $data[] = [
+                    'id_logger' => $lid,
+                    'nama_logger' => $l['nama_logger'] ?? $l['nama_lokasi'] ?? '',
+                    'lokasi' => $l['nama_lokasi'] ?? '',
+                    'kategori' => $kat_label,
+                    'latitude' => $l['latitude'] ?? '',
+                    'longitude' => $l['longitude'] ?? '',
+                    'koneksi' => $kn,
+                    'keterangan_koneksi' => $kn_label,
+                    'waktu_terakhir' => $waktu
+                ];
             }
         }
 
@@ -1197,6 +1481,23 @@ class Chatbot extends CI_Controller
 
         $info = $this->db->where('logger_id', $id_logger)->get('t_informasi')->row();
         if (!$info) {
+            // ── PSDA fallback: cari info dari API PSDA ──
+            $psda_data = $this->_psda_find_logger($id_logger);
+            if ($psda_data) {
+                return $this->_json_response([
+                    'status' => 'sukses',
+                    'sumber' => 'PSDA',
+                    'data' => [
+                        'id_logger' => $psda_data['id_logger'],
+                        'nama_logger' => $psda_data['nama_logger'],
+                        'lokasi' => $psda_data['lokasi'],
+                        'kategori' => $psda_data['kategori'],
+                        'latitude' => $psda_data['latitude'],
+                        'longitude' => $psda_data['longitude'],
+                        'keterangan' => 'Data dari pos PSDA, detail teknis tidak tersedia'
+                    ]
+                ]);
+            }
             return $this->_json_response(['status' => 'error', 'message' => 'Logger tidak ditemukan']);
         }
 
@@ -1260,6 +1561,18 @@ class Chatbot extends CI_Controller
             ];
         }
 
+        // ── PSDA fallback: ambil parameter dari API PSDA ──
+        if (empty($data)) {
+            $psda_params = $this->_psda_get_parameters($id_logger);
+            if (!empty($psda_params)) {
+                return $this->_json_response([
+                    'status' => 'sukses',
+                    'sumber' => 'PSDA',
+                    'data' => $psda_params
+                ]);
+            }
+        }
+
         $this->_json_response([
             'status' => 'sukses',
             'data' => $data
@@ -1285,6 +1598,24 @@ class Chatbot extends CI_Controller
             ->get('t_logger')->row();
 
         if (!$logger) {
+            // ── PSDA fallback: cek koneksi via API PSDA ──
+            $psda_rt = $this->_psda_get_realtime($id_logger);
+            if ($psda_rt) {
+                $waktu = $psda_rt['waktu'] ?? null;
+                $kn = $this->_cek_koneksi($waktu);
+                return $this->_json_response([
+                    'status' => 'sukses',
+                    'sumber' => 'PSDA',
+                    'data' => [
+                        'id_logger' => $id_logger,
+                        'nama_lokasi' => $psda_rt['nama_logger'] ?? '',
+                        'koneksi' => $kn,
+                        'keterangan' => ($kn === 'On') ? 'Koneksi Terhubung' : 'Koneksi Terputus',
+                        'waktu_terakhir' => $waktu,
+                        'is_perbaikan' => false
+                    ]
+                ]);
+            }
             return $this->_json_response(['status' => 'error', 'message' => 'Logger tidak ditemukan']);
         }
 
@@ -1319,6 +1650,151 @@ class Chatbot extends CI_Controller
                 'is_perbaikan' => false
             ]
         ]);
+    }
+
+    // ═══════════════════════════════════════════
+    // PSDA HELPER METHODS
+    // ═══════════════════════════════════════════
+
+    /**
+     * Load logger_mapping.json and cache in memory.
+     * Returns the full mapping array.
+     */
+    private $_logger_mapping_cache = null;
+    private function _load_logger_mapping()
+    {
+        if ($this->_logger_mapping_cache !== null) {
+            return $this->_logger_mapping_cache;
+        }
+        $path = FCPATH . 'logger_mapping.json';
+        if (!file_exists($path)) {
+            $this->_logger_mapping_cache = [];
+            return [];
+        }
+        $this->_logger_mapping_cache = json_decode(file_get_contents($path), true) ?: [];
+        return $this->_logger_mapping_cache;
+    }
+
+    /**
+     * Find a logger by ID in logger_mapping.json.
+     * Returns the logger data with parent category info, or null.
+     */
+    private function _mapping_find_logger($id_logger)
+    {
+        $mapping = $this->_load_logger_mapping();
+        foreach ($mapping as $cat) {
+            foreach ($cat['logger'] as $l) {
+                if ((string) ($l['id_logger'] ?? '') === (string) $id_logger) {
+                    $l['_kategori_nama'] = $cat['nama_kategori'];
+                    $l['_kategori_id'] = $cat['id_katlogger'];
+                    $l['_temp_data'] = $cat['temp_data'];
+                    $l['_tabel'] = $cat['tabel'];
+                    $l['_is_psda'] = !empty($l['status_aset']);
+                    return $l;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Get realtime data from PSDA API.
+     * Uses logger_mapping.json to determine the correct temp table first.
+     * Falls back to trying both tables if logger not found in mapping.
+     */
+    private function _psda_get_realtime($id_logger)
+    {
+        // Check mapping to determine correct table
+        $mapped = $this->_mapping_find_logger($id_logger);
+        if ($mapped) {
+            $temp = $mapped['temp_tabel'] ?? $mapped['_temp_data'] ?? '';
+            if ($temp) {
+                $url = "https://dpupesdm.monitoring4system.com/api/dtakhir?idlogger={$id_logger}&tabel={$temp}";
+                $out = @json_decode(@file_get_contents($url), true);
+                if (!empty($out) && !empty($out['data_terakhir'])) {
+                    return $out;
+                }
+            }
+        }
+
+        // Fallback: try both tables
+        $tables = ['temp_weather_station', 'temp_awlr'];
+        foreach ($tables as $tbl) {
+            $url = "https://dpupesdm.monitoring4system.com/api/dtakhir?idlogger={$id_logger}&tabel={$tbl}";
+            $out = @json_decode(@file_get_contents($url), true);
+            if (!empty($out) && !empty($out['data_terakhir'])) {
+                return $out;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Find a logger in data sources (local mapping first, then PSDA API fallback).
+     * Returns ['id_logger', 'nama_logger', 'lokasi', 'kategori', ...] or null.
+     */
+    private function _psda_find_logger($id_logger)
+    {
+        $mapped = $this->_mapping_find_logger($id_logger);
+        if ($mapped) {
+            $is_psda = !empty($mapped['status_aset']);
+            return [
+                'id_logger' => $mapped['id_logger'],
+                'nama_logger' => $mapped['nama_logger'] ?? $mapped['nama_lokasi'] ?? '',
+                'lokasi' => $mapped['nama_lokasi'] ?? '',
+                'kategori' => $mapped['_kategori_nama'] . ($is_psda ? ' (PSDA)' : ' (BBWS)'),
+                'latitude' => $mapped['latitude'] ?? '',
+                'longitude' => $mapped['longitude'] ?? '',
+                'das' => $mapped['das'] ?? '',
+                'status_aset' => $mapped['status_aset'] ?? 'BBWS',
+                'status_logger' => $mapped['status_logger'] ?? '',
+                'temp_tabel' => $mapped['temp_tabel'] ?? $mapped['_temp_data'] ?? '',
+                'is_psda' => $is_psda,
+            ];
+        }
+        return null;
+    }
+
+    /**
+     * Get parameters for a logger from local mapping.
+     * Falls back to PSDA realtime API if not found.
+     */
+    private function _psda_get_parameters($id_logger)
+    {
+        // First try local mapping
+        $mapped = $this->_mapping_find_logger($id_logger);
+        if ($mapped && !empty($mapped['param'])) {
+            $params = [];
+            foreach ($mapped['param'] as $p) {
+                // Handle both PSDA and BBWS param formats
+                $params[] = [
+                    'id_param' => $p['id_param'] ?? $p['id'] ?? '',
+                    'nama_parameter' => $p['nama_parameter'] ?? $p['alias_sensor'] ?? '',
+                    'kolom_sensor' => $p['kolom_sensor'] ?? $p['field_sensor'] ?? '',
+                    'satuan' => $p['satuan'] ?? '',
+                    'tipe_graf' => $p['tipe_graf'] ?? 'spline',
+                    'icon' => $p['icon_app'] ?? $p['icon_sensor'] ?? '',
+                ];
+            }
+            return $params;
+        }
+
+        // Fallback: try PSDA realtime API
+        $rt = $this->_psda_get_realtime($id_logger);
+        if (!empty($rt['data_terakhir'])) {
+            $params = [];
+            foreach ($rt['data_terakhir'] as $s) {
+                $params[] = [
+                    'id_param' => $s['idsensor'] ?? $s['id_param'] ?? '',
+                    'nama_parameter' => $s['sensor'] ?? $s['nama_parameter'] ?? '',
+                    'satuan' => $s['satuan'] ?? '',
+                    'tipe_graf' => $s['tipe_graf'] ?? 'spline',
+                    'icon' => $s['icon'] ?? $s['icon_app'] ?? ''
+                ];
+            }
+            return $params;
+        }
+        return [];
     }
 
     // ═══════════════════════════════════════════
@@ -1373,7 +1849,8 @@ class Chatbot extends CI_Controller
             ->get('t_logger')->row();
 
         if (!$logger) {
-            return $this->_json_response(['status' => 'error', 'message' => 'Logger tidak ditemukan']);
+            // ── PSDA fallback: gunakan API analisa PSDA ──
+            return $this->_ringkasan_psda_fallback($id_logger, $mode, $start, $end, $tanggal, $bulan);
         }
 
         // Ambil semua parameter sensor
@@ -1586,6 +2063,95 @@ class Chatbot extends CI_Controller
             'total_parameter' => count($ringkasan),
             'ringkasan' => $ringkasan
         ]);
+    }
+
+    /**
+     * Ringkasan fallback for PSDA loggers.
+     * Uses PSDA analisa endpoints and dtakhir to build a summary.
+     */
+    private function _ringkasan_psda_fallback($id_logger, $mode, $start, $end, $tanggal, $bulan)
+    {
+        // Find logger info from PSDA
+        $psda_info = $this->_psda_find_logger($id_logger);
+        $nama = $psda_info ? $psda_info['nama_logger'] : '';
+        $lokasi = $psda_info ? $psda_info['lokasi'] : '';
+        $kategori = $psda_info ? $psda_info['kategori'] : 'PSDA';
+
+        // Get parameter list from PSDA
+        $params = $this->_psda_get_parameters($id_logger);
+        if (empty($params)) {
+            return $this->_json_response(['status' => 'error', 'message' => 'Logger PSDA tidak ditemukan atau tidak memiliki parameter']);
+        }
+
+        // For each parameter, call PSDA analisa API and extract summary
+        $ringkasan = [];
+        $base = 'https://dpupesdm.monitoring4system.com/api/';
+
+        foreach ($params as $p) {
+            $id_sensor = $p['id_param'];
+            if (empty($id_sensor))
+                continue;
+
+            // Call appropriate PSDA analisa endpoint
+            if ($mode === 'harian') {
+                $url = $base . "analisapertanggal2?idsensor={$id_sensor}&tanggal={$start}";
+            } elseif ($mode === 'bulanan') {
+                $url = $base . "analisaperbulan2?idsensor={$id_sensor}&tanggal={$bulan}";
+            } else {
+                // range
+                $url = $base . "analisaperrange2?idsensor={$id_sensor}&dari={$start}&sampai={$end}";
+            }
+
+            $data_psda = @json_decode(@file_get_contents($url), true);
+            if (empty($data_psda['data']))
+                continue;
+
+            $values = [];
+            if (is_array($data_psda['data'])) {
+                $values = array_map('floatval', array_filter($data_psda['data'], 'is_numeric'));
+            }
+
+            if (empty($values))
+                continue;
+
+            $is_column = ($p['tipe_graf'] ?? 'spline') === 'column';
+            $item = [
+                'parameter' => str_replace('_', ' ', $p['nama_parameter']),
+                'satuan' => $p['satuan'],
+            ];
+
+            if ($is_column) {
+                $item['total'] = round(array_sum($values), 2);
+                $item['max_per_jam'] = round(max($values), 2);
+                $item['klasifikasi_harian'] = $this->_klasifikasi_hujan_harian(array_sum($values));
+            } else {
+                $item['rata_rata'] = round(array_sum($values) / count($values), 2);
+                $item['minimum'] = round(min($values), 2);
+                $item['maximum'] = round(max($values), 2);
+            }
+
+            $ringkasan[] = $item;
+        }
+
+        $response = [
+            'status' => 'sukses',
+            'sumber' => 'PSDA',
+            'id_logger' => $id_logger,
+            'nama' => $nama,
+            'lokasi' => $lokasi,
+            'kategori' => $kategori,
+            'mode' => $mode,
+            'total_parameter' => count($ringkasan),
+            'ringkasan' => $ringkasan
+        ];
+
+        if ($start === $end) {
+            $response['tanggal'] = $start;
+        } else {
+            $response['periode'] = $start . ' s/d ' . $end;
+        }
+
+        return $this->_json_response($ringkasan ? $response : ['status' => 'error', 'message' => 'Data PSDA tidak tersedia untuk periode ini']);
     }
 
     // ═══════════════════════════════════════════
@@ -1806,11 +2372,11 @@ class Chatbot extends CI_Controller
 
         // fallback PSDA jika logger tidak ada lokal
         if (!$logger) {
-            $tabel_fallback = 'temp_awlr';
-            $out = @json_decode(file_get_contents("https://dpupesdm.monitoring4system.com/api/dtakhir?idlogger={$id_logger}&tabel={$tabel_fallback}"), true);
+            $psda_rt = $this->_psda_get_realtime($id_logger);
             return $this->_json_response([
-                'status' => $out ? 'sukses' : 'error',
-                'data' => $out
+                'status' => $psda_rt ? 'sukses' : 'error',
+                'sumber' => 'PSDA',
+                'data' => $psda_rt
             ]);
         }
 

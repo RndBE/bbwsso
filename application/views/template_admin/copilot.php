@@ -558,35 +558,149 @@
         }
     }
 
-    /* ── Typing Indicator ── */
-    .copilot-typing {
-        display: flex;
-        gap: 4px;
-        padding: 12px 16px;
+    /* ── Progress Loading Indicator ── */
+    .copilot-progress {
         align-self: flex-start;
+        max-width: 280px;
+        padding: 14px 18px;
+        background: #f3f4f6;
+        border-radius: 16px;
+        border-bottom-left-radius: 4px;
+        font-family: Inter, system-ui, sans-serif;
+        animation: copilotFadeIn .3s ease;
     }
 
-    .copilot-typing span {
-        width: 8px;
-        height: 8px;
-        background: #6b7280;
-        border-radius: 50%;
-        animation: copilotBounce .6s infinite alternate;
-    }
-
-    .copilot-typing span:nth-child(2) {
-        animation-delay: .2s;
-    }
-
-    .copilot-typing span:nth-child(3) {
-        animation-delay: .4s;
-    }
-
-    @keyframes copilotBounce {
-        to {
-            transform: translateY(-6px);
-            opacity: .4;
+    @keyframes copilotFadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(8px);
         }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .copilot-progress-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+
+    .copilot-progress-icon {
+        font-size: 18px;
+        animation: copilotIconPop .4s ease;
+    }
+
+    @keyframes copilotIconPop {
+        0% {
+            transform: scale(0);
+        }
+
+        60% {
+            transform: scale(1.2);
+        }
+
+        100% {
+            transform: scale(1);
+        }
+    }
+
+    .copilot-progress-label {
+        font-size: 13px;
+        color: #374151;
+        font-weight: 500;
+        flex: 1;
+    }
+
+    .copilot-progress-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #4a4fc4;
+        animation: copilotDotPulse 1s infinite;
+    }
+
+    @keyframes copilotDotPulse {
+
+        0%,
+        100% {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        50% {
+            opacity: .4;
+            transform: scale(.7);
+        }
+    }
+
+    .copilot-progress-bar-wrap {
+        width: 100%;
+        height: 4px;
+        background: #e5e7eb;
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 8px;
+    }
+
+    .copilot-progress-bar {
+        height: 100%;
+        border-radius: 4px;
+        background: linear-gradient(90deg, #303481, #4a4fc4, #818cf8);
+        background-size: 200% 100%;
+        animation: copilotBarShimmer 2s linear infinite;
+        transition: width .6s cubic-bezier(.4, 0, .2, 1);
+        width: 0%;
+    }
+
+    @keyframes copilotBarShimmer {
+        0% {
+            background-position: 200% 0;
+        }
+
+        100% {
+            background-position: -200% 0;
+        }
+    }
+
+    .copilot-progress-steps {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+    }
+
+    .copilot-progress-step {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11.5px;
+        color: #9ca3af;
+        transition: color .3s, opacity .3s;
+    }
+
+    .copilot-progress-step.active {
+        color: #374151;
+        font-weight: 500;
+    }
+
+    .copilot-progress-step.done {
+        color: #16a34a;
+    }
+
+    .copilot-progress-step .step-icon {
+        font-size: 12px;
+        width: 16px;
+        text-align: center;
+    }
+
+    .copilot-progress-timer {
+        font-size: 11px;
+        color: #9ca3af;
+        text-align: right;
+        margin-top: 6px;
     }
 
     /* ── Responsive ── */
@@ -869,12 +983,11 @@
             input.value = '';
             input.style.height = 'auto';
 
-            // Show typing indicator
-            var typing = document.createElement('div');
-            typing.className = 'copilot-typing';
-            typing.innerHTML = '<span></span><span></span><span></span>';
-            body.appendChild(typing);
+            // Show progress loading indicator
+            var progressEl = createProgressIndicator();
+            body.appendChild(progressEl);
             scrollBottom();
+            var progressTimer = startProgressAnimation(progressEl);
 
             // Build request body
             var reqBody = { message: text };
@@ -890,7 +1003,8 @@
             })
                 .then(function (res) { return res.json(); })
                 .then(function (data) {
-                    typing.remove();
+                    clearInterval(progressTimer);
+                    progressEl.remove();
 
                     // Save session_id from backend
                     if (data.session_id) {
@@ -916,7 +1030,8 @@
                     }
                 })
                 .catch(function (err) {
-                    typing.remove();
+                    clearInterval(progressTimer);
+                    progressEl.remove();
                     console.error('Copilot error:', err);
                     addMsg('Gagal menghubungi server. Periksa koneksi Anda.', 'bot', false, true);
                 })
@@ -971,6 +1086,80 @@
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/\n/g, '<br>');
+        }
+        // ── Progress Loading Indicator ──
+        var PROGRESS_STEPS = [
+            { icon: '🔍', label: 'Mencari data...', pct: 15 },
+            { icon: '📊', label: 'Mengambil dari database...', pct: 35 },
+            { icon: '🔄', label: 'Memproses data...', pct: 55 },
+            { icon: '🧠', label: 'Menyusun jawaban...', pct: 75 },
+            { icon: '✨', label: 'Finishing...', pct: 90 }
+        ];
+
+        function createProgressIndicator() {
+            var el = document.createElement('div');
+            el.className = 'copilot-progress';
+
+            var stepsHtml = PROGRESS_STEPS.map(function (s, i) {
+                return '<div class="copilot-progress-step' + (i === 0 ? ' active' : '') + '" data-idx="' + i + '">'
+                    + '<span class="step-icon">' + (i === 0 ? s.icon : '○') + '</span>'
+                    + '<span>' + s.label + '</span></div>';
+            }).join('');
+
+            el.innerHTML = '<div class="copilot-progress-header">'
+                + '<span class="copilot-progress-icon">' + PROGRESS_STEPS[0].icon + '</span>'
+                + '<span class="copilot-progress-label">' + PROGRESS_STEPS[0].label + '</span>'
+                + '<span class="copilot-progress-dot"></span></div>'
+                + '<div class="copilot-progress-bar-wrap"><div class="copilot-progress-bar" style="width:5%"></div></div>'
+                + '<div class="copilot-progress-steps">' + stepsHtml + '</div>'
+                + '<div class="copilot-progress-timer">0 detik</div>';
+            return el;
+        }
+
+        function startProgressAnimation(el) {
+            var stepIdx = 0;
+            var startTime = Date.now();
+            var bar = el.querySelector('.copilot-progress-bar');
+            var headerIcon = el.querySelector('.copilot-progress-icon');
+            var headerLabel = el.querySelector('.copilot-progress-label');
+            var timerEl = el.querySelector('.copilot-progress-timer');
+            var stepEls = el.querySelectorAll('.copilot-progress-step');
+
+            // Initial bar
+            setTimeout(function () { bar.style.width = PROGRESS_STEPS[0].pct + '%'; }, 100);
+
+            var timer = setInterval(function () {
+                // Update elapsed time
+                var elapsed = Math.floor((Date.now() - startTime) / 1000);
+                timerEl.textContent = elapsed + ' detik';
+
+                // Advance step every ~3 seconds
+                if (elapsed > 0 && elapsed % 3 === 0 && stepIdx < PROGRESS_STEPS.length - 1) {
+                    // Mark current as done
+                    stepEls[stepIdx].classList.remove('active');
+                    stepEls[stepIdx].classList.add('done');
+                    stepEls[stepIdx].querySelector('.step-icon').textContent = '✓';
+
+                    stepIdx++;
+                    var step = PROGRESS_STEPS[stepIdx];
+
+                    // Activate next
+                    stepEls[stepIdx].classList.add('active');
+                    stepEls[stepIdx].querySelector('.step-icon').textContent = step.icon;
+
+                    // Update header
+                    headerIcon.textContent = step.icon;
+                    headerIcon.style.animation = 'none';
+                    headerIcon.offsetHeight; // reflow
+                    headerIcon.style.animation = 'copilotIconPop .4s ease';
+                    headerLabel.textContent = step.label;
+
+                    // Update bar
+                    bar.style.width = step.pct + '%';
+                }
+            }, 1000);
+
+            return timer;
         }
     })();
 </script>
