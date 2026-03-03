@@ -449,7 +449,8 @@ class Chatbot extends CI_Controller
                         'properties' => [
                             'kategori' => [
                                 'type' => 'string',
-                                'description' => 'ID kategori logger untuk filter. Gunakan "all" untuk semua kategori. Contoh: "1" untuk ARR, "2" untuk AWLR, "3" untuk AWS.'
+                                'enum' => ['all', 'arr', 'awlr', 'aws', 'afmr'],
+                                'description' => 'Filter kategori. "all" untuk semua, "arr" untuk curah hujan, "awlr" untuk tinggi muka air, "aws" untuk cuaca, "afmr" untuk debit.'
                             ]
                         ],
                         'required' => []
@@ -1313,149 +1314,36 @@ class Chatbot extends CI_Controller
     public function logger_list()
     {
         $input = $this->_json_input();
-        $kategori = isset($input['kategori']) ? $input['kategori'] : 'all';
+        $kategori = isset($input['kategori']) ? strtolower(trim($input['kategori'])) : 'all';
 
-        $data = [];
-
-        if ($kategori === 'all') {
-            $query_kat = $this->db->query('SELECT * FROM kategori_logger WHERE view = 1');
-        } else {
-            $query_kat = $this->db->query("SELECT * FROM kategori_logger WHERE view = 1 AND id_katlogger = '$kategori'");
-        }
-
-        foreach ($query_kat->result() as $kat) {
-            $tabel = $kat->tabel;
-            $tabel_temp = $kat->temp_data;
-
-            $query_logger = $this->db->query("
-				SELECT * FROM t_logger 
-				INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi 
-				WHERE kategori_log = '$kat->id_katlogger'
-			");
-
-            foreach ($query_logger->result() as $lok) {
-                $id_logger = $lok->id_logger;
-                $tabel_main = $lok->tabel_main;
-
-                // cek perbaikan
-                $is_perbaikan = $this->db->where('id_logger', $id_logger)->count_all_results('t_perbaikan') > 0;
-
-                if ($is_perbaikan) {
-                    $data[] = [
-                        'id_logger' => $id_logger,
-                        'nama_logger' => $lok->nama_logger,
-                        'lokasi' => $lok->nama_lokasi,
-                        'kategori' => $kat->nama_kategori,
-                        'latitude' => $lok->latitude,
-                        'longitude' => $lok->longitude,
-                        'koneksi' => 'perbaikan',
-                        'keterangan_koneksi' => 'Sedang Perbaikan',
-                        'waktu_terakhir' => null
-                    ];
-                    continue;
-                }
-
-                // ambil data terakhir
-                $temp = $this->db->where('code_logger', $id_logger)->get($tabel_temp)->row();
-                $waktu = $temp ? $temp->waktu : null;
-
-                $kn = $this->_cek_koneksi($waktu);
-                $keter = ($kn === 'On') ? 'Koneksi Terhubung' : 'Koneksi Terputus';
-
-                $item = [
-                    'id_logger' => $id_logger,
-                    'nama_logger' => $lok->nama_logger,
-                    'lokasi' => $lok->nama_lokasi,
-                    'kategori' => $kat->nama_kategori,
-                    'latitude' => $lok->latitude,
-                    'longitude' => $lok->longitude,
-                    'koneksi' => $kn,
-                    'keterangan_koneksi' => $keter,
-                    'waktu_terakhir' => $waktu
-                ];
-
-                // untuk ARR / AWS, tambah klasifikasi hujan jam + harian
-                if ($kn === 'On' && ($kat->controller == 'awr' || $kat->controller == 'arr')) {
-                    $p_utama = $this->db->where('logger_id', $id_logger)->where('parameter_utama', '1')->get('parameter_sensor')->row();
-                    if ($p_utama) {
-                        $kolom = $p_utama->kolom_sensor;
-
-                        // akumulasi per jam (jam ini)
-                        $akum_jam = $this->db->query("SELECT SUM({$kolom}) as val FROM {$tabel_main} WHERE code_logger = '{$id_logger}' AND waktu >= '" . date('Y-m-d H') . ":00'")->row();
-                        $val_jam = $akum_jam->val ?? 0;
-
-                        // akumulasi per hari (hari ini)
-                        $akum_hari = $this->db->query("SELECT SUM({$kolom}) as val FROM {$tabel_main} WHERE code_logger = '{$id_logger}' AND waktu >= '" . date('Y-m-d') . " 00:00'")->row();
-                        $val_hari = $akum_hari->val ?? 0;
-
-                        $item['curah_hujan_jam'] = [
-                            'nilai' => number_format($val_jam, 2, '.', ''),
-                            'satuan' => 'mm/jam',
-                            'klasifikasi' => $this->_klasifikasi_hujan_jam($val_jam)
-                        ];
-                        $item['curah_hujan_harian'] = [
-                            'nilai' => number_format($val_hari, 2, '.', ''),
-                            'satuan' => 'mm/hari',
-                            'klasifikasi' => $this->_klasifikasi_hujan_harian($val_hari)
-                        ];
-
-                        $keter = $this->_klasifikasi_hujan_jam($val_jam);
-                    }
-                }
-
-                $item['keterangan_koneksi'] = $keter;
-                $data[] = $item;
-            }
-        }
-
-        // ── Merge loggers from logger_mapping.json ──
         $mapping = $this->_load_logger_mapping();
-        $local_ids = array_column($data, 'id_logger');
+        $data = [];
 
         foreach ($mapping as $cat) {
             $cat_name = $cat['nama_kategori'];
 
-            // Category filter check
-            if ($kategori !== 'all' && (string) $cat['id_katlogger'] !== (string) $kategori) {
+            // Category filter — match by nama_kategori
+            if ($kategori !== 'all' && stripos($cat_name, $kategori) === false) {
                 continue;
             }
 
             foreach ($cat['logger'] as $l) {
-                $lid = $l['id_logger'] ?? '';
-                // Skip duplicates already from local DB
-                if (in_array($lid, $local_ids))
-                    continue;
-
                 $is_psda = !empty($l['status_aset']);
-                $kat_label = $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)');
                 $status = $l['status_logger'] ?? '';
-                $waktu = $l['waktu'] ?? null;
-                $kn = $this->_cek_koneksi($waktu);
 
-                // Use status from mapping if available
                 if (stripos($status, 'Perbaikan') !== false) {
-                    $kn_label = 'Sedang Perbaikan';
                     $kn = 'perbaikan';
                 } elseif (stripos($status, 'Terhubung') !== false) {
-                    $kn_label = 'Koneksi Terhubung';
                     $kn = 'On';
-                } elseif (stripos($status, 'Terputus') !== false) {
-                    $kn_label = 'Koneksi Terputus';
-                    $kn = 'Off';
                 } else {
-                    $kn_label = ($kn === 'On') ? 'Koneksi Terhubung' : 'Koneksi Terputus';
+                    $kn = 'Off';
                 }
 
                 $data[] = [
-                    'id_logger' => $lid,
-                    'nama_logger' => $l['nama_logger'] ?? $l['nama_lokasi'] ?? '',
-                    'lokasi' => $l['nama_lokasi'] ?? '',
-                    'kategori' => $kat_label,
-                    'latitude' => $l['latitude'] ?? '',
-                    'longitude' => $l['longitude'] ?? '',
-                    'koneksi' => $kn,
-                    'keterangan_koneksi' => $kn_label,
-                    'waktu_terakhir' => $waktu
+                    'id_logger' => $l['id_logger'] ?? '',
+                    'nama' => $l['nama_logger'] ?? $l['nama_lokasi'] ?? '',
+                    'kategori' => $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)'),
+                    'koneksi' => $kn
                 ];
             }
         }

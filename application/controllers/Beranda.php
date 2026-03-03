@@ -476,6 +476,241 @@ class Beranda extends CI_Controller
 	}
 
 
+	public function beranda_get()
+	{
+		$isUser2 = ($this->session->userdata('id_user') === '2');
+		if ($isUser2) {
+			$ktg = $this->db
+				->where_in('id_katlogger', ['2', '7'])
+				->get('kategori_logger')
+				->result_array();
+		} else {
+			$ktg = $this->db
+				->where('view', '1')
+				->get('kategori_logger')
+				->result_array();
+		}
+		foreach ($ktg as $key => $kat) {
+			$tabelTemp = $kat['temp_data'];
+			$idKat = $kat['id_katlogger'];
+
+			$this->db->from('t_logger')
+				->join('t_lokasi', 't_logger.lokasi_logger = t_lokasi.idlokasi', 'left')
+				->where('kategori_log', $idKat)
+				->order_by('id_logger', 'ASC');
+
+			if ($isUser2) {
+				$this->db->where('t_logger.user_id', '2');
+			} else {
+				$this->db->where('t_lokasi.das !=', '');
+			}
+
+			$data_logger = $this->db->get()->result_array();
+
+			if (empty($data_logger)) {
+				$ktg[$key]['logger'] = [];
+				continue;
+			}
+
+			$loggerIds = array_column($data_logger, 'id_logger');
+
+			$perbaikanRows = $this->db
+				->where_in('id_logger', $loggerIds)
+				->get('t_perbaikan')
+				->result();
+			$mapPerbaikan = [];
+			foreach ($perbaikanRows as $r) {
+				$mapPerbaikan[$r->id_logger] = true;
+			}
+
+			$tempRows = $this->db
+				->where_in('code_logger', $loggerIds)
+				->get($tabelTemp)
+				->result();
+			$mapTemp = [];
+			foreach ($tempRows as $r) {
+				$mapTemp[$r->code_logger] = $r;
+			}
+			$paramRows = $this->db
+				->query("
+                SELECT *
+                FROM parameter_sensor
+                WHERE logger_id IN ?
+                ORDER BY CAST(SUBSTRING(kolom_sensor,7) AS UNSIGNED)
+            ", [$loggerIds])
+				->result_array();
+
+			$mapParams = [];
+			foreach ($paramRows as $pr) {
+				$lid = $pr['logger_id'];
+				if (!isset($mapParams[$lid]))
+					$mapParams[$lid] = [];
+				$mapParams[$lid][] = $pr;
+			}
+
+			$awalTs = time() - 3600; // 1 jam
+			$awal = date('Y-m-d H:i', $awalTs);
+			$sd15Loggers = ['10247', '10248', '10288', '10249', '10290', '10289', '10345', '10358', '10347', '10346', '10348'];
+
+			$listLogger = [];
+			foreach ($data_logger as $log) {
+				$idLogger = $log['id_logger'];
+				$namaLokasi = $log['nama_lokasi'];
+
+				$temp = isset($mapTemp[$idLogger]) ? $mapTemp[$idLogger] : null;
+
+				$waktu = $temp && !empty($temp->waktu) ? $temp->waktu : null;
+
+				$color = 'black';
+				$statusLogger = 'Koneksi Terputus';
+
+				if ($waktu && $waktu >= $awal) {
+					$color = '#32b344';
+					$statusLogger = 'Koneksi Terhubung';
+				}
+
+				if (!empty($mapPerbaikan[$idLogger])) {
+					$color = '#7f6226';
+					$statusLogger = 'Perbaikan';
+				}
+
+				$kolomSd = in_array($idLogger, $sd15Loggers, true) ? 'sensor15' : 'sensor13';
+				$sdcard = 'Bermasalah';
+				if ($temp && isset($temp->$kolomSd) && $temp->$kolomSd === '1') {
+					$sdcard = 'OK';
+				}
+
+				$paramList = isset($mapParams[$idLogger]) ? $mapParams[$idLogger] : [];
+				foreach ($paramList as $ky => $val) {
+					$kolom = $val['kolom_sensor'];
+					$h = ($temp && isset($temp->$kolom)) ? $temp->$kolom : null;
+					if ($val['debit_awlr'] === '1' && $idLogger === '10063') {
+						$debit = $this->kalimeneng((float) $h);
+						$paramList[$ky]['nilai'] = number_format(max(0, (float) $debit), 2, '.', '');
+					} elseif ($val['nama_parameter'] === 'Debit' && $idLogger === '10249') {
+						$n2 = ($temp && isset($temp->sensor2)) ? (float) $temp->sensor2 : 0.0;
+						$paramList[$ky]['nilai'] = number_format($this->linear_interpolation($n2 * 100) * (float) $h, 2, '.', '');
+					} elseif ($val['nama_parameter'] === 'Luas_Penampang_Basah') {
+						$n2 = ($temp && isset($temp->sensor2)) ? (float) $temp->sensor2 : 0.0;
+						$paramList[$ky]['nilai'] = number_format($this->linear_interpolation($n2 * 100), 2, '.', '');
+					} elseif ($val['nama_parameter'] === 'Debit_Aliran_Sungai') {
+						$s1 = ($temp && isset($temp->sensor1)) ? (float) $temp->sensor1 : 0.0;
+						$s2 = ($temp && isset($temp->sensor2)) ? (float) $temp->sensor2 : 0.0;
+						$n2 = $s1 - $s2;
+						if ($s2 > $s1) {
+							$paramList[$ky]['nilai'] = number_format(0, 2, '.', '');
+						} else {
+							$paramList[$ky]['nilai'] = number_format($this->debit_interpolation($n2), 2, '.', '');
+						}
+					} else {
+						$paramList[$ky]['nilai'] = $h;
+					}
+
+					$get = http_build_query([
+						'id_param' => $val['id_param'] . '_' . 'bbws',
+					]);
+					$paramList[$ky]['link'] = 'analisa/set_sensordash?' . $get;
+				}
+				if ($idLogger === '10247') {
+					// Peta param by id_param
+					$byId = [];
+					foreach ($paramList as $p) {
+						$byId[(string) $p['id_param']] = $p;
+					}
+
+					// Definisi grup
+					$shared = ['330', '331', '332'];
+					$group1Id = '371';
+					$group2Id = '372';
+					$extra2 = ['374'];
+					$extra1 = ['329'];
+
+					$group1_ids = array_merge([$group1Id], $shared, $extra1);
+					$group2_ids = array_merge([$group2Id], $shared, $extra2);
+
+					// Kumpulkan param sesuai grup (hanya yang ada)
+					$group1_params = [];
+					foreach ($group1_ids as $pid) {
+						if (isset($byId[$pid]))
+							$group1_params[] = $byId[$pid];
+					}
+					$group2_params = [];
+					foreach ($group2_ids as $pid) {
+						if (isset($byId[$pid]))
+							$group2_params[] = $byId[$pid];
+					}
+
+					// Tambahkan entri terpisah sesuai ketersediaan param
+					if (!empty($group1_params)) {
+						$listLogger[] = [
+							'id_logger' => $idLogger . '_' . $group1Id,         // unik
+							'nama_lokasi' => 'Pos AWLR Carik Barat',    // rename
+							'waktu' => $waktu,
+							'color' => $color,
+							'status_logger' => $statusLogger,
+							'status_sd' => $sdcard,
+							'param' => $group1_params,                      // 371 + 330/331/332 + 324
+						];
+					}
+
+					if (!empty($group2_params)) {
+						$listLogger[] = [
+							'id_logger' => $idLogger . '_' . $group2Id,         // unik
+							'nama_lokasi' => 'Pos AWLR Sungai Bogowonto',    // rename
+							'waktu' => $waktu,
+							'color' => $color,
+							'status_logger' => $statusLogger,
+							'status_sd' => $sdcard,
+							'param' => $group2_params,                      // 372 + 330/331/332 + 329
+						];
+					}
+				} else {
+					// default (logger normal, tidak di-split)
+					$listLogger[] = [
+						'id_logger' => $idLogger,
+
+						'nama_lokasi' => $namaLokasi,
+						'waktu' => $waktu,
+						'color' => $color,
+						'status_logger' => $statusLogger,
+						'status_sd' => $sdcard,
+						'param' => $paramList,
+					];
+				}
+			}
+			$ktg[$key]['logger'] = $listLogger;
+		}
+
+		$data_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/beranda'), true);
+
+		foreach ($ktg as $kw => $sv) {
+			if ($sv['nama_kategori'] == 'AWLR') {
+				$nama = 'Duga Air Sungai';
+				$logger_psda = $data_psda[$nama]['logger'];
+				$merge = array_merge($logger_psda, $sv['logger']);
+				$ktg[$kw]['logger'] = (array) $merge;
+			} elseif ($sv['nama_kategori'] == 'ARR') {
+				$nama = 'Curah Hujan';
+				$logger_psda = $data_psda[$nama]['logger'];
+				$merge = array_merge($logger_psda, $sv['logger']);
+				$ktg[$kw]['logger'] = (array) $merge;
+			}
+			if ($sv['nama_kategori'] == 'AWS') {
+				$nama = 'Stasiun Cuaca';
+				$logger_psda = $data_psda[$nama]['logger'];
+				$merge = array_merge($logger_psda, $sv['logger']);
+				$ktg[$kw]['logger'] = (array) $merge;
+			}
+		}
+
+		// Perbarui file logger_mapping.json
+		$jsonPath = FCPATH . 'logger_mapping.json';
+		file_put_contents($jsonPath, json_encode($ktg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+
+	}
+
+
 	public function integrasi()
 	{
 		if ($this->session->userdata('logged_in')) {
