@@ -313,17 +313,18 @@ class Chatbot extends CI_Controller
         return "Kamu adalah Copilot, asisten AI untuk sistem monitoring BBWS Serayu Opak (Balai Besar Wilayah Sungai). "
             . "Tugasmu membantu pengguna memahami data dari pos-pos monitoring (logger) seperti AWS, ARR, AWLR, dan sensor lainnya.\n\n"
             . "PENGETAHUAN KATEGORI LOGGER:\n"
-            . "- AWS (Automatic Weather Station): sensor cuaca LENGKAP (suhu, kelembapan, angin, tekanan udara, radiasi matahari, curah hujan). Pertanyaan 'cuaca', 'suhu', 'kelembapan', 'angin', 'tekanan' → cari pos AWS.\n"
-            . "- ARR (Automatic Rain Recorder): KHUSUS sensor curah hujan. Pertanyaan 'hujan' bisa AWS atau ARR.\n"
+            . "- AWS (Automatic Weather Station) / AWR (Automatic Weather Recorder): SAMA, hanya beda istilah. BBWS menyebut AWS, PSDA menyebut AWR. Sensor cuaca LENGKAP (suhu, kelembapan, angin, tekanan udara, radiasi matahari, curah hujan). Pertanyaan 'cuaca', 'suhu', 'kelembapan', 'angin', 'tekanan' → cari pos AWS/AWR.\n"
+            . "- ARR (Automatic Rain Recorder): KHUSUS sensor curah hujan. Pertanyaan 'hujan' bisa AWS/AWR atau ARR.\n"
             . "- AWLR (Automatic Water Level Recorder): sensor TMA (Tinggi Muka Air) dan debit sungai. Pertanyaan 'tinggi muka air', 'debit', 'TMA', 'banjir' → cari pos AWLR.\n"
             . "- Klimatologi: mirip AWS, sensor cuaca lengkap.\n"
             . "- AFMR (Automatic Flow Meter Recorder): sensor debit sungai.\n\n"
+            . "PENTING TERMINOLOGI: AWR = AWS (sama persis). Jika user menyebut 'AWR' itu sama dengan 'AWS'. Jangan bingung dengan 'AWLR' yang berbeda (untuk tinggi muka air).\n\n"
             . "ATURAN PENTING SAAT USER TIDAK MENYEBUT POS SPESIFIK:\n"
             . "- Jika user tanya 'cuaca 7 hari terakhir' TANPA menyebut pos → TANYAKAN pos mana yang dimaksud. Jangan loop semua pos.\n"
-            . "- Jika user tanya tentang cuaca umum → gunakan search_logger(keyword='aws') untuk cari pos AWS, lalu tanyakan pos mana.\n"
-            . "- Jika user tanya tentang hujan di suatu wilayah → gunakan cek_hujan untuk status live, atau gunakan search_logger(keyword='arr') untuk cari pos ARR/AWS.\n"
+            . "- Jika user tanya tentang cuaca umum → gunakan search_logger(keyword='cuaca') untuk cari pos AWS/AWR, lalu tanyakan pos mana.\n"
+            . "- Jika user tanya tentang hujan di suatu wilayah → gunakan cek_hujan untuk status live, atau gunakan search_logger(keyword='hujan') untuk cari pos ARR/AWS.\n"
             . "- Jika user tanya tentang CURAH HUJAN HISTORIS di SEMUA pos pada tanggal tertentu → gunakan cek_hujan_historis.\n"
-            . "- Jika user tanya tentang TMA/debit → gunakan search_logger(keyword='awlr') untuk cari pos AWLR.\n"
+            . "- Jika user tanya tentang TMA/debit → gunakan search_logger(keyword='awlr') atau search_logger(keyword='TMA') untuk cari pos AWLR.\n"
             . "- JANGAN PERNAH loop panggil get_data_ringkasan untuk semua pos → token akan habis!\n\n"
             . "Konteks waktu saat ini:\n"
             . "- Sekarang: {$now} ({$hari})\n"
@@ -347,10 +348,35 @@ class Chatbot extends CI_Controller
             . "  * Jika user hanya tanya SATU parameter → tambahkan filter parameter.\n"
             . "  * Gunakan get_data_analisa HANYA jika user minta data DETAIL PER-JAM untuk SATU parameter SPESIFIK.\n"
             . "  * JANGAN PERNAH memanggil get_data_analisa berulang kali untuk banyak parameter!\n"
-            . "- Jika minta perbandingan, gunakan get_data_komparasi.\n"
-            . "- Format jawaban dengan rapi. Gunakan tabel markdown untuk data ringkasan.\n"
+            . "- Jika minta perbandingan, gunakan get_data_komparasi.\n\n"
+            . "PENTING ALUR PERMINTAAN DATA:\n"
+            . "- Jika user minta 'data pengukuran', 'data terkini', 'data pos X' → LANGSUNG panggil get_data_ringkasan (untuk hari ini). JANGAN tampilkan daftar parameter/detail teknis terlebih dahulu.\n"
+            . "- JANGAN memanggil get_logger_parameter kecuali user SECARA EKSPLISIT minta 'daftar sensor' atau 'parameter apa saja'.\n"
+            . "- JANGAN memanggil get_logger_detail kecuali user minta info teknis (serial number, IMEI, PIC, dll).\n"
+            . "- Alur ideal: search_logger → LANGSUNG get_data_ringkasan. Jangan ada langkah perantara yang tidak perlu.\n"
+            . "- Saat menampilkan data parameter, JANGAN tampilkan info teknis seperti tipe_graf, icon, kolom_sensor. Cukup tampilkan nama parameter, nilai, dan satuan.\n\n"
+            . "- Format jawaban dengan rapi.\n"
+            . "- Untuk data ringkasan SATU WAKTU dengan banyak parameter (misal data terkini pos X), gunakan format list/bullet BUKAN tabel. Contoh: '🌡️ Suhu: 24°C | 💧 Kelembapan: 87.5% | 💨 Angin: 0.03 Km'.\n"
+            . "- Gunakan tabel markdown HANYA untuk data yang punya BANYAK BARIS (perbandingan antar waktu/tanggal/pos, data harian, data per-jam, daftar pos).\n"
+            . "- Setiap tabel otomatis mendapat tombol 'Download CSV'. JANGAN tawarkan ekspor data secara manual, cukup beri tahu user bahwa tombol download tersedia di bawah tabel.\n"
             . "- Saat menampilkan data, SELALU buat ringkasan singkat yang informatif.\n"
-            . "- Untuk data hujan, gunakan klasifikasi yang sudah disediakan di response.\n"
+            . "- Untuk data hujan, gunakan klasifikasi yang sudah disediakan di response.\n\n"
+            . "MENAMPILKAN GRAFIK:\n"
+            . "- Jika user minta grafik/chart, atau jika data cocok ditampilkan sebagai grafik, gunakan format code block ```chart dengan JSON config.\n"
+            . "- Format JSON: {\"type\":\"line\",\"title\":\"Judul\",\"yLabel\":\"Satuan\",\"labels\":[\"08:00\",\"09:00\",...],\"datasets\":[{\"label\":\"Nama\",\"data\":[1,2,...]}]}\n"
+            . "- Gunakan type 'line' untuk semua parameter (suhu, kelembapan, angin, TMA, dll).\n"
+            . "- Gunakan type 'bar' HANYA untuk curah hujan.\n"
+            . "- labels berisi array waktu/tanggal, datasets berisi array data numerik.\n"
+            . "- Contoh untuk curah hujan:\n"
+            . "```chart\n"
+            . "{\"type\":\"bar\",\"title\":\"Curah Hujan Harian\",\"yLabel\":\"mm\",\"labels\":[\"01 Mar\",\"02 Mar\"],\"datasets\":[{\"label\":\"mm\",\"data\":[5.2,12.4]}]}\n"
+            . "```\n"
+            . "- Contoh untuk suhu:\n"
+            . "```chart\n"
+            . "{\"type\":\"line\",\"title\":\"Temperatur Udara\",\"yLabel\":\"°C\",\"labels\":[\"06:00\",\"07:00\",\"08:00\"],\"datasets\":[{\"label\":\"°C\",\"data\":[22.5,23.1,24.0]}]}\n"
+            . "```\n"
+            . "- PENTING: Data chart HARUS dari function call, JANGAN mengarang data.\n"
+            . "- Tampilkan grafik setelah tabel ringkasan, bukan sebagai pengganti tabel.\n\n"
             . "- Jika data tidak tersedia atau error, sampaikan dengan sopan.\n"
             . "- Jangan mengarang data, selalu ambil dari function yang tersedia.\n"
             . "- Tampilkan data numerik dengan format yang mudah dibaca.";
@@ -427,12 +453,12 @@ class Chatbot extends CI_Controller
                         'properties' => [
                             'keyword' => [
                                 'type' => 'string',
-                                'description' => 'Kata kunci nama pos atau lokasi, contoh: "Seturan", "Pejengkolan", "Kali Meneng"'
+                                'description' => 'Kata kunci nama pos atau lokasi, contoh: "Seturan", "Pejengkolan", "Kali Meneng", "AWR Kaliurang"'
                             ],
                             'kategori' => [
                                 'type' => 'string',
-                                'enum' => ['aws', 'arr', 'awlr', 'klimatologi', 'afmr'],
-                                'description' => 'Opsional: filter berdasarkan kategori logger. Gunakan "aws" untuk cuaca, "arr" untuk hujan, "awlr" untuk TMA/debit.'
+                                'enum' => ['aws', 'awr', 'arr', 'awlr', 'klimatologi', 'afmr'],
+                                'description' => 'Opsional: soft filter kategori. "aws" atau "awr" = cuaca (sama), "arr" = hujan, "awlr" = TMA/debit. PENTING: "awr" dan "aws" itu SAMA.'
                             ]
                         ],
                         'required' => ['keyword']
@@ -449,8 +475,8 @@ class Chatbot extends CI_Controller
                         'properties' => [
                             'kategori' => [
                                 'type' => 'string',
-                                'enum' => ['all', 'arr', 'awlr', 'aws', 'afmr'],
-                                'description' => 'Filter kategori. "all" untuk semua, "arr" untuk curah hujan, "awlr" untuk tinggi muka air, "aws" untuk cuaca, "afmr" untuk debit.'
+                                'enum' => ['all', 'arr', 'awlr', 'aws', 'awr', 'afmr'],
+                                'description' => 'Filter kategori. "all" untuk semua, "arr" untuk curah hujan, "awlr" untuk tinggi muka air, "aws"/"awr" untuk cuaca (sama), "afmr" untuk debit.'
                             ]
                         ],
                         'required' => []
@@ -714,8 +740,7 @@ class Chatbot extends CI_Controller
             'model' => $model,
             'messages' => $messages,
             'tools' => $tools,
-            'temperature' => 0.4,
-            'max_tokens' => 2048,
+            'max_completion_tokens' => 2048,
         ];
 
         $ch = curl_init('https://api.openai.com/v1/chat/completions');
@@ -837,9 +862,7 @@ class Chatbot extends CI_Controller
                 if ($is_hujan) {
                     $pos_hujan[] = [
                         'id_logger' => $id_logger,
-                        'nama_logger' => $lok->nama_logger,
                         'lokasi' => $lok->nama_lokasi,
-                        'kategori' => $kat->nama_kategori,
                         'curah_hujan_jam' => number_format($val_jam, 2, '.', ''),
                         'klasifikasi_jam' => $klas_jam,
                         'curah_hujan_harian' => number_format($val_hari, 2, '.', ''),
@@ -850,9 +873,7 @@ class Chatbot extends CI_Controller
                     if ($filter === 'semua') {
                         $pos_hujan[] = [
                             'id_logger' => $id_logger,
-                            'nama_logger' => $lok->nama_logger,
                             'lokasi' => $lok->nama_lokasi,
-                            'kategori' => $kat->nama_kategori,
                             'curah_hujan_jam' => '0.00',
                             'klasifikasi_jam' => $klas_jam,
                             'curah_hujan_harian' => number_format($val_hari, 2, '.', ''),
@@ -928,9 +949,7 @@ class Chatbot extends CI_Controller
                 if ($is_hujan) {
                     $pos_hujan[] = [
                         'id_logger' => $lid,
-                        'nama_logger' => $l['nama_logger'] ?? $l['nama_lokasi'] ?? '',
                         'lokasi' => $l['nama_lokasi'] ?? '',
-                        'kategori' => $kat_label,
                         'curah_hujan_jam' => number_format($rain_val, 2, '.', ''),
                         'klasifikasi_jam' => $klas_jam,
                         'curah_hujan_harian' => number_format($rain_val, 2, '.', ''),
@@ -941,9 +960,7 @@ class Chatbot extends CI_Controller
                     if ($filter === 'semua') {
                         $pos_hujan[] = [
                             'id_logger' => $lid,
-                            'nama_logger' => $l['nama_logger'] ?? $l['nama_lokasi'] ?? '',
                             'lokasi' => $l['nama_lokasi'] ?? '',
-                            'kategori' => $kat_label,
                             'curah_hujan_jam' => '0.00',
                             'klasifikasi_jam' => $klas_jam,
                             'curah_hujan_harian' => '0.00',
@@ -1127,7 +1144,7 @@ class Chatbot extends CI_Controller
     }
 
     // ═══════════════════════════════════════════
-    // SEARCH LOGGER — fuzzy name search
+    // SEARCH LOGGER — fuzzy name search (using loilo/fuse)
     // ═══════════════════════════════════════════
     public function search_logger()
     {
@@ -1139,133 +1156,71 @@ class Chatbot extends CI_Controller
             return $this->_json_response(['status' => 'error', 'message' => 'keyword wajib diisi']);
         }
 
-        // Split keyword into parts for flexible matching
-        // e.g. "AWLR Seturan" → ["awlr", "seturan"]
-        $kw_lower = strtolower($keyword);
-        $parts = preg_split('/[\s_\-]+/', $kw_lower);
-        $parts = array_filter($parts, function ($p) {
-            return strlen($p) >= 2;
-        }); // skip very short words
-
-        if (empty($parts)) {
-            $parts = [$kw_lower];
-        }
-
-        // Use CI Active Record for proper escaping
-        $this->db->select('t_logger.id_logger, t_logger.nama_logger, t_lokasi.nama_lokasi, kategori_logger.nama_kategori, t_lokasi.latitude, t_lokasi.longitude');
-        $this->db->from('t_logger');
-        $this->db->join('t_lokasi', 't_logger.lokasi_logger = t_lokasi.idlokasi', 'inner');
-        $this->db->join('kategori_logger', 't_logger.kategori_log = kategori_logger.id_katlogger', 'inner');
-
-        // Each keyword part must match either nama_logger OR nama_lokasi
-        foreach ($parts as $part) {
-            $this->db->group_start();
-            $this->db->like('t_logger.nama_logger', $part, 'both');
-            $this->db->or_like('t_lokasi.nama_lokasi', $part, 'both');
-            $this->db->or_like('kategori_logger.nama_kategori', $part, 'both');
-            $this->db->group_end();
-        }
-
-        // Category filter
+        // If kategori provided, append to keyword as soft signal for Fuse
+        // e.g. keyword "kaliurang" + kategori "aws" → search "aws kaliurang"
+        // This avoids hard filtering that breaks AWR/AWS cross-terminology
+        $search_term = $keyword;
         if ($kategori !== '') {
-            $this->db->like('kategori_logger.nama_kategori', $kategori, 'both');
+            $search_term = $kategori . ' ' . $keyword;
         }
 
-        $this->db->order_by('t_logger.nama_logger', 'ASC');
-        $this->db->limit(15);
-
-        $query = $this->db->get();
-        $results = $query->result();
-
-        // Score results using similar_text for ranking
-        $scored = [];
-        foreach ($results as $row) {
-            $combined = strtolower($row->nama_kategori . ' ' . $row->nama_logger . ' ' . $row->nama_lokasi);
-            similar_text($kw_lower, $combined, $percent);
-
-            // Bonus if exact substring match in nama_logger or nama_lokasi
-            $bonus = 0;
-            if (stripos($row->nama_logger, $keyword) !== false)
-                $bonus += 30;
-            if (stripos($row->nama_lokasi, $keyword) !== false)
-                $bonus += 20;
-
-            $scored[] = [
-                'id_logger' => $row->id_logger,
-                'nama_logger' => $row->nama_logger,
-                'lokasi' => $row->nama_lokasi,
-                'kategori' => $row->nama_kategori,
-                'latitude' => $row->latitude,
-                'longitude' => $row->longitude,
-                'relevance' => round($percent + $bonus, 1)
-            ];
-        }
-
-        // ── Integration: search logger_mapping.json too ──
-        $local_ids = array_column($scored, 'id_logger');
+        // Build flat list from logger_mapping.json (no pre-filtering)
+        $list = [];
         $mapping = $this->_load_logger_mapping();
+
         foreach ($mapping as $cat) {
             $cat_name = $cat['nama_kategori'];
-            // Skip if kategori filter doesn't match
-            if ($kategori !== '' && stripos($cat_name, $kategori) === false) {
-                continue;
-            }
 
             foreach ($cat['logger'] as $l) {
-                $lid = $l['id_logger'] ?? '';
-                // Skip if already in local results
-                if (in_array($lid, $local_ids))
-                    continue;
-
                 $nama = $l['nama_logger'] ?? $l['nama_lokasi'] ?? '';
                 $lokasi = $l['nama_lokasi'] ?? '';
                 $is_psda = !empty($l['status_aset']);
-                $kat_label = $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)');
-                $combined_map = strtolower($kat_label . ' ' . $nama . ' ' . $lokasi);
 
-                // Check if any keyword part matches
-                $match = false;
-                foreach ($parts as $part) {
-                    if (stripos($nama, $part) !== false || stripos($lokasi, $part) !== false) {
-                        $match = true;
-                        break;
-                    }
-                }
-                if (!$match)
-                    continue;
-
-                similar_text($kw_lower, $combined_map, $pct);
-                $bonus = 0;
-                if (stripos($nama, $keyword) !== false)
-                    $bonus += 30;
-                if (stripos($lokasi, $keyword) !== false)
-                    $bonus += 20;
-
-                $scored[] = [
-                    'id_logger' => $lid,
+                $list[] = [
+                    'id_logger' => $l['id_logger'] ?? '',
                     'nama_logger' => $nama,
                     'lokasi' => $lokasi,
-                    'kategori' => $kat_label,
+                    'kategori' => $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)'),
                     'latitude' => $l['latitude'] ?? '',
                     'longitude' => $l['longitude'] ?? '',
-                    'relevance' => round($pct + $bonus, 1)
+                    // Space-stripped variant so "watubarut" matches "Watu Barut"
+                    'lokasi_stripped' => strtolower(preg_replace('/[\s_\-\.]+/', '', $lokasi)),
                 ];
             }
         }
 
-        // Sort by relevance descending
-        usort($scored, function ($a, $b) {
-            return $b['relevance'] <=> $a['relevance'];
-        });
+        // Fuse fuzzy search
+        $fuse = new \Fuse\Fuse($list, [
+            'keys' => ['lokasi', 'kategori', 'lokasi_stripped'],
+            'threshold' => 0.4,
+            'ignoreLocation' => true,
+            'includeScore' => true,
+            'minMatchCharLength' => 2,
+            'shouldSort' => true,
+        ]);
 
-        // Limit results
-        $scored = array_slice($scored, 0, 15);
+        $results = $fuse->search($search_term);
+
+        // Format results (limit 15)
+        $data = [];
+        foreach (array_slice($results, 0, 15) as $r) {
+            $item = $r['item'];
+            $data[] = [
+                'id_logger' => $item['id_logger'],
+                'nama_logger' => $item['nama_logger'],
+                'lokasi' => $item['lokasi'],
+                'kategori' => $item['kategori'],
+                'latitude' => $item['latitude'],
+                'longitude' => $item['longitude'],
+                'relevance' => round((1 - $r['score']) * 100, 1)
+            ];
+        }
 
         $this->_json_response([
             'status' => 'sukses',
             'keyword' => $keyword,
-            'total' => count($scored),
-            'data' => $scored
+            'total' => count($data),
+            'data' => $data
         ]);
     }
 
@@ -1315,6 +1270,10 @@ class Chatbot extends CI_Controller
     {
         $input = $this->_json_input();
         $kategori = isset($input['kategori']) ? strtolower(trim($input['kategori'])) : 'all';
+
+        // Normalize: AWR = AWS (beda istilah PSDA vs BBWS)
+        if ($kategori === 'awr')
+            $kategori = 'aws';
 
         $mapping = $this->_load_logger_mapping();
         $data = [];
@@ -1382,7 +1341,7 @@ class Chatbot extends CI_Controller
                         'kategori' => $psda_data['kategori'],
                         'latitude' => $psda_data['latitude'],
                         'longitude' => $psda_data['longitude'],
-                        'keterangan' => 'Data dari pos PSDA, detail teknis tidak tersedia'
+                        'keterangan' => 'Data dari pos PSDA'
                     ]
                 ]);
             }
@@ -1393,13 +1352,11 @@ class Chatbot extends CI_Controller
         $logger = $this->db->where('id_logger', $id_logger)->get('t_logger')->row();
         $kategori = $this->db->where('id_katlogger', $logger->kategori_log)->get('kategori_logger')->row();
         $status_sd = 'OK';
-        $status_sensor = 'OK';
 
         if ($kategori) {
             $cek = $this->db->query("SELECT sensor13, sensor12 FROM {$kategori->temp_data} WHERE code_logger = '{$id_logger}' ORDER BY waktu DESC LIMIT 1")->row();
             if ($cek) {
                 $status_sd = ($cek->sensor13 == '1') ? 'OK' : 'Terjadi Kesalahan';
-                $status_sensor = ($cek->sensor12 == '1') ? 'OK' : 'Terjadi Kesalahan';
             }
         }
 
@@ -1418,8 +1375,6 @@ class Chatbot extends CI_Controller
                 'imei' => $info->imei,
                 'nama_pic' => $info->nama_pic,
                 'no_pic' => $info->no_pic,
-                'status_sd' => $status_sd,
-                'status_sensor' => $status_sensor
             ]
         ]);
     }

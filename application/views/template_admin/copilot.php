@@ -330,6 +330,56 @@
         font-weight: 600;
     }
 
+    /* CSV Download Button */
+    .copilot-csv-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin: 6px 0 2px;
+        padding: 5px 14px;
+        background: #303481;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 500;
+        font-family: Inter, system-ui, sans-serif;
+        cursor: pointer;
+        transition: background .15s, transform .1s;
+    }
+
+    .copilot-csv-btn:hover {
+        background: #4a4fc4;
+        transform: translateY(-1px);
+    }
+
+    .copilot-csv-btn:active {
+        transform: translateY(0);
+    }
+
+    /* Chart Container */
+    .copilot-chart-wrap {
+        width: 100%;
+        margin: 8px 0;
+        background: #fff;
+        border-radius: 10px;
+        padding: 12px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
+    }
+
+    .copilot-chart-wrap canvas {
+        width: 100% !important;
+        max-height: 260px;
+    }
+
+    .copilot-chart-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #303481;
+        margin-bottom: 8px;
+        font-family: Inter, system-ui, sans-serif;
+    }
+
     /* Error message style */
     .copilot-msg.bot.error {
         background: #fef2f2;
@@ -819,6 +869,8 @@
 
 <!-- Marked.js for Markdown rendering -->
 <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<!-- Chart.js for inline charts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <script>
     (function () {
         // ── Config ──
@@ -1058,11 +1110,119 @@
 
             if (isHtml) {
                 div.innerHTML = content;
+                // Inject CSV download button after each table
+                var tables = div.querySelectorAll('table');
+                tables.forEach(function (tbl, idx) {
+                    var btn = document.createElement('button');
+                    btn.className = 'copilot-csv-btn';
+                    btn.innerHTML = '📥 Download CSV';
+                    btn.onclick = function () { copilotExportCSV(tbl); };
+                    tbl.parentNode.insertBefore(btn, tbl.nextSibling);
+                });
+                // Detect and render ```chart code blocks
+                var chartBlocks = div.querySelectorAll('code.language-chart');
+                chartBlocks.forEach(function (block) {
+                    try {
+                        var config = JSON.parse(block.textContent);
+                        var pre = block.parentNode; // <pre> wrapper
+                        var wrap = document.createElement('div');
+                        wrap.className = 'copilot-chart-wrap';
+                        if (config.title) {
+                            var titleEl = document.createElement('div');
+                            titleEl.className = 'copilot-chart-title';
+                            titleEl.textContent = config.title;
+                            wrap.appendChild(titleEl);
+                        }
+                        var canvas = document.createElement('canvas');
+                        wrap.appendChild(canvas);
+                        pre.parentNode.replaceChild(wrap, pre);
+                        renderCopilotChart(canvas, config);
+                    } catch (e) { console.warn('Chart parse error:', e); }
+                });
             } else {
                 div.textContent = content;
             }
             body.appendChild(div);
             scrollBottom();
+        }
+
+        // ── Export table to CSV ──
+        function copilotExportCSV(table) {
+            var csv = [];
+            var rows = table.querySelectorAll('tr');
+            rows.forEach(function (row) {
+                var cols = row.querySelectorAll('th, td');
+                var rowData = [];
+                cols.forEach(function (col) {
+                    var text = col.innerText.replace(/"/g, '""');
+                    rowData.push('"' + text + '"');
+                });
+                csv.push(rowData.join(','));
+            });
+            var csvContent = csv.join('\n');
+            var blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'data_copilot_' + new Date().toISOString().slice(0, 10) + '.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // ── Render Chart.js chart ──
+        var CHART_COLORS = ['#303481', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#3498db'];
+        function renderCopilotChart(canvas, config) {
+            if (typeof Chart === 'undefined') return;
+            var labels = config.labels || [];
+            var datasets = (config.datasets || []).map(function (ds, i) {
+                var isBar = (config.type === 'bar') || (ds.type === 'bar');
+                var color = CHART_COLORS[i % CHART_COLORS.length];
+                return {
+                    label: ds.label || '',
+                    data: ds.data || [],
+                    type: isBar ? 'bar' : undefined,
+                    borderColor: isBar ? undefined : color,
+                    backgroundColor: isBar ? color + '99' : color + '22',
+                    borderWidth: isBar ? 0 : 2,
+                    tension: 0.3,
+                    fill: !isBar,
+                    pointRadius: labels.length > 30 ? 0 : 3,
+                    pointHoverRadius: 5
+                };
+            });
+            var chartType = config.type === 'bar' ? 'bar' : 'line';
+            new Chart(canvas, {
+                type: chartType,
+                data: { labels: labels, datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: datasets.length > 1, position: 'top', labels: { font: { size: 11, family: 'Inter' } } },
+                        tooltip: { backgroundColor: '#1f2937', titleFont: { size: 12 }, bodyFont: { size: 11 } }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                font: { size: 9 },
+                                maxRotation: 45,
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            }
+                        },
+                        y: {
+                            grid: { color: '#f3f4f6' }, ticks: { font: { size: 10 } },
+                            title: { display: !!config.yLabel, text: config.yLabel || '', font: { size: 11 } }
+                        }
+                    },
+                    layout: {
+                        padding: { left: 0, right: 8, top: 0, bottom: 0 }
+                    }
+                }
+            });
+            canvas.parentNode.style.height = '280px';
         }
 
         function scrollBottom() {
