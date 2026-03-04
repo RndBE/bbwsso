@@ -357,7 +357,7 @@ class Chatbot extends CI_Controller
             . "- Saat menampilkan data parameter, JANGAN tampilkan info teknis seperti tipe_graf, icon, kolom_sensor. Cukup tampilkan nama parameter, nilai, dan satuan.\n\n"
             . "- Format jawaban dengan rapi.\n"
             . "- Untuk data ringkasan SATU WAKTU dengan banyak parameter (misal data terkini pos X), gunakan format list/bullet BUKAN tabel. Contoh: '🌡️ Suhu: 24°C | 💧 Kelembapan: 87.5% | 💨 Angin: 0.03 Km'.\n"
-            . "- Gunakan tabel markdown HANYA untuk data yang punya BANYAK BARIS (perbandingan antar waktu/tanggal/pos, data harian, data per-jam, daftar pos).\n"
+            . "- Gunakan tabel markdown HANYA untuk data yang punya BANYAK BARIS (perbandingan antar waktu/tanggal/pos, data harian, data per-jam, daftar pos, hasil cek_hujan, hasil cek_hujan_historis).\n"
             . "- Setiap tabel otomatis mendapat tombol 'Download CSV'. JANGAN tawarkan ekspor data secara manual, cukup beri tahu user bahwa tombol download tersedia di bawah tabel.\n"
             . "- Saat menampilkan data, SELALU buat ringkasan singkat yang informatif.\n"
             . "- Untuk data hujan, gunakan klasifikasi yang sudah disediakan di response.\n\n"
@@ -886,90 +886,48 @@ class Chatbot extends CI_Controller
             }
         }
 
-        // ── Merge rain data from logger_mapping.json ──
-        $mapping = $this->_load_logger_mapping();
+        // ── Merge rain data from PSDA API ──
         $local_ids = [];
-        foreach ($pos_hujan as $ph) {
-            $local_ids[] = $ph['id_logger'];
-        }
-        // Also collect IDs from local DB loop (even non-rain pos)
         $query_local_ids = $this->db->query("SELECT id_logger FROM t_logger");
         foreach ($query_local_ids->result() as $r) {
             $local_ids[] = $r->id_logger;
         }
 
-        foreach ($mapping as $cat) {
-            // Only AWS and ARR categories have rain data
-            if (!in_array($cat['nama_kategori'], ['AWS', 'ARR']))
-                continue;
-            $cat_name = $cat['nama_kategori'];
+        // Always fetch ALL PSDA stations to count total_pos correctly
+        $psda_url = "https://dpupesdm.monitoring4system.com/integrasi/cek_hujan?filter=semua";
+        $psda_json = @file_get_contents($psda_url);
+        $psda_data = @json_decode($psda_json, true);
 
-            foreach ($cat['logger'] as $l) {
-                $lid = $l['id_logger'] ?? '';
-                if (in_array($lid, $local_ids))
-                    continue;
+        if (!empty($psda_data['data'])) {
+            foreach ($psda_data['data'] as $p) {
+                $pid = $p['id_logger'] ?? '';
+                if (in_array($pid, $local_ids))
+                    continue; // skip local loggers
 
                 $total_pos++;
-                $is_psda = !empty($l['status_aset']);
-                $kat_label = $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)');
-                $status = $l['status_logger'] ?? '';
-                $waktu = $l['waktu'] ?? null;
+                $val_jam = floatval($p['curah_hujan_jam'] ?? 0);
+                $val_hari = floatval($p['curah_hujan_harian'] ?? 0);
+                $is_hujan = ($val_jam > 0);
+                $koneksi = $p['status_koneksi'] ?? 'On';
 
-                // Check status
-                if (stripos($status, 'Perbaikan') !== false) {
-                    $pos_perbaikan++;
-                    continue;
-                }
-
-                $kn = $this->_cek_koneksi($waktu);
-                if (stripos($status, 'Terputus') !== false) {
-                    $kn = 'Off';
-                }
-                if ($kn !== 'On') {
+                if ($koneksi !== 'On') {
                     $pos_offline++;
                     continue;
                 }
 
-                // Find rain parameter in mapping params
-                $rain_val = 0;
-                if (!empty($l['param'])) {
-                    foreach ($l['param'] as $p) {
-                        $pname = strtolower($p['nama_parameter'] ?? $p['alias_sensor'] ?? '');
-                        if (strpos($pname, 'curah_hujan') !== false || strpos($pname, 'rainfall') !== false) {
-                            $v = floatval($p['nilai'] ?? 0);
-                            if ($v > $rain_val)
-                                $rain_val = $v;
-                        }
-                    }
-                }
-
-                $klas_jam = $this->_klasifikasi_hujan_jam($rain_val);
-                $is_hujan = ($rain_val > 0);
-
-                if ($is_hujan) {
+                if ($is_hujan || $filter === 'semua') {
                     $pos_hujan[] = [
-                        'id_logger' => $lid,
-                        'lokasi' => $l['nama_lokasi'] ?? '',
-                        'curah_hujan_jam' => number_format($rain_val, 2, '.', ''),
-                        'klasifikasi_jam' => $klas_jam,
-                        'curah_hujan_harian' => number_format($rain_val, 2, '.', ''),
-                        'klasifikasi_harian' => $this->_klasifikasi_hujan_harian($rain_val),
-                        'waktu_terakhir' => $waktu
+                        'id_logger' => $pid,
+                        'lokasi' => $p['lokasi'] ?? '',
+                        'curah_hujan_jam' => number_format($val_jam, 2, '.', ''),
+                        'klasifikasi_jam' => $this->_klasifikasi_hujan_jam($val_jam),
+                        'curah_hujan_harian' => number_format($val_hari, 2, '.', ''),
+                        'klasifikasi_harian' => $this->_klasifikasi_hujan_harian($val_hari),
+                        'waktu_terakhir' => $p['waktu_terakhir'] ?? null
                     ];
-                } else {
-                    if ($filter === 'semua') {
-                        $pos_hujan[] = [
-                            'id_logger' => $lid,
-                            'lokasi' => $l['nama_lokasi'] ?? '',
-                            'curah_hujan_jam' => '0.00',
-                            'klasifikasi_jam' => $klas_jam,
-                            'curah_hujan_harian' => '0.00',
-                            'klasifikasi_harian' => 'Berawan / Tidak Hujan',
-                            'waktu_terakhir' => $waktu
-                        ];
-                    }
-                    $pos_tidak_hujan++;
                 }
+                if (!$is_hujan)
+                    $pos_tidak_hujan++;
             }
         }
 
@@ -1062,45 +1020,25 @@ class Chatbot extends CI_Controller
             }
         }
 
-        // ── 2) Query PSDA loggers from mapping via PSDA API ──
-        $mapping = $this->_load_logger_mapping();
-        foreach ($mapping as $cat) {
-            if (!in_array($cat['nama_kategori'], ['AWS', 'ARR']))
-                continue;
-            $cat_name = $cat['nama_kategori'];
-            $temp_tabel = $cat['temp_data'];
+        // Always fetch ALL PSDA stations to count total_pos correctly
+        $psda_url = "https://dpupesdm.monitoring4system.com/integrasi/cek_hujan_historis?tanggal={$tanggal}&filter=semua";
+        $psda_json = @file_get_contents($psda_url);
+        $psda_data = @json_decode($psda_json, true);
 
-            foreach ($cat['logger'] as $l) {
-                $lid = $l['id_logger'] ?? '';
-                if (in_array($lid, $local_ids))
+        if (!empty($psda_data['data'])) {
+            foreach ($psda_data['data'] as $p) {
+                $pid = $p['id_logger'] ?? '';
+                if (in_array($pid, $local_ids))
                     continue;
-                if (empty($l['status_aset']))
-                    continue; // only PSDA loggers not already in local
 
                 $total_pos++;
-
-                // Call PSDA analysis API for this date
-                $tbl = $l['temp_tabel'] ?? $temp_tabel;
-                $url = "https://dpupesdm.monitoring4system.com/api/analisapertanggal2"
-                    . "?idlogger={$lid}&tanggal={$tanggal}&tabel={$tbl}";
-                $psda = @json_decode(@file_get_contents($url), true);
-
-                $val = 0;
-                if (!empty($psda['data'])) {
-                    // Sum all rain values from the day data
-                    foreach ($psda['data'] as $row) {
-                        // Look for rain column (sensor1 is typically rain for ARR)
-                        $rain = floatval($row['sensor1'] ?? $row['curah_hujan'] ?? 0);
-                        $val += $rain;
-                    }
-                }
-
+                $val = floatval($p['curah_hujan_harian'] ?? 0);
                 $klas = $this->_klasifikasi_hujan_harian($val);
                 $is_hujan = ($val > 0);
 
                 if ($is_hujan || $filter === 'semua') {
                     $pos_data[] = [
-                        'pos' => $l['nama_logger'] ?? $l['nama_lokasi'] ?? '',
+                        'pos' => $p['lokasi'] ?? '',
                         'mm' => number_format($val, 2, '.', ''),
                         'klasifikasi' => $klas
                     ];

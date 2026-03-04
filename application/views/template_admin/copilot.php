@@ -310,11 +310,18 @@
         color: #6b7280;
     }
 
+    .copilot-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin: 6px 0;
+    }
+
     .copilot-msg.bot table {
         width: 100%;
+        min-width: 360px;
         border-collapse: collapse;
-        margin: 6px 0;
         font-size: 13px;
+        margin: 0;
     }
 
     .copilot-msg.bot th,
@@ -322,6 +329,7 @@
         border: 1px solid #e5e7eb;
         padding: 5px 8px;
         text-align: left;
+        white-space: nowrap;
     }
 
     .copilot-msg.bot th {
@@ -335,7 +343,7 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        margin: 6px 0 2px;
+        margin: 6px 0 8px;
         padding: 5px 14px;
         background: #303481;
         color: #fff;
@@ -360,6 +368,7 @@
     /* Chart Container */
     .copilot-chart-wrap {
         width: 100%;
+        max-height: 280px;
         margin: 8px 0;
         background: #fff;
         border-radius: 10px;
@@ -369,7 +378,7 @@
 
     .copilot-chart-wrap canvas {
         width: 100% !important;
-        max-height: 260px;
+        max-height: 235px;
     }
 
     .copilot-chart-title {
@@ -753,6 +762,50 @@
         margin-top: 6px;
     }
 
+    /* ── Typing dots indicator ── */
+    .copilot-typing {
+        align-self: flex-start;
+        padding: 14px 20px;
+        background: #f3f4f6;
+        border-radius: 16px;
+        border-bottom-left-radius: 4px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        animation: copilotFadeIn .3s ease;
+    }
+
+    .copilot-typing .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #9ca3af;
+        animation: copilotTypingBounce 1.2s ease-in-out infinite;
+    }
+
+    .copilot-typing .dot:nth-child(2) {
+        animation-delay: 0.15s;
+    }
+
+    .copilot-typing .dot:nth-child(3) {
+        animation-delay: 0.3s;
+    }
+
+    @keyframes copilotTypingBounce {
+
+        0%,
+        60%,
+        100% {
+            transform: translateY(0);
+            opacity: 0.4;
+        }
+
+        30% {
+            transform: translateY(-6px);
+            opacity: 1;
+        }
+    }
+
     /* ── Responsive ── */
     @media (max-width: 576px) {
         #copilot-fab span.fab-label {
@@ -762,6 +815,11 @@
         #copilot-fab {
             padding: 14px;
             border-radius: 50%;
+        }
+
+        .copilot-chart-wrap canvas {
+            width: 100% !important;
+            max-height: 215px;
         }
 
         #copilot-modal {
@@ -1035,11 +1093,25 @@
             input.value = '';
             input.style.height = 'auto';
 
-            // Show progress loading indicator
-            var progressEl = createProgressIndicator();
-            body.appendChild(progressEl);
+            // Show simple typing dots first
+            var typingEl = document.createElement('div');
+            typingEl.className = 'copilot-typing';
+            typingEl.innerHTML = '<span class="dot"></span><span class="dot"></span><span class="dot"></span>';
+            body.appendChild(typingEl);
             scrollBottom();
-            var progressTimer = startProgressAnimation(progressEl);
+
+            // After 3 seconds, upgrade to full progress indicator
+            var progressEl = null;
+            var progressTimer = null;
+            var upgradeTimeout = setTimeout(function () {
+                if (typingEl.parentNode) {
+                    typingEl.remove();
+                    progressEl = createProgressIndicator();
+                    body.appendChild(progressEl);
+                    scrollBottom();
+                    progressTimer = startProgressAnimation(progressEl);
+                }
+            }, 5000);
 
             // Build request body
             var reqBody = { message: text };
@@ -1055,8 +1127,10 @@
             })
                 .then(function (res) { return res.json(); })
                 .then(function (data) {
-                    clearInterval(progressTimer);
-                    progressEl.remove();
+                    clearTimeout(upgradeTimeout);
+                    if (progressTimer) clearInterval(progressTimer);
+                    if (typingEl.parentNode) typingEl.remove();
+                    if (progressEl && progressEl.parentNode) progressEl.remove();
 
                     // Save session_id from backend
                     if (data.session_id) {
@@ -1082,8 +1156,10 @@
                     }
                 })
                 .catch(function (err) {
-                    clearInterval(progressTimer);
-                    progressEl.remove();
+                    clearTimeout(upgradeTimeout);
+                    if (progressTimer) clearInterval(progressTimer);
+                    if (typingEl.parentNode) typingEl.remove();
+                    if (progressEl && progressEl.parentNode) progressEl.remove();
                     console.error('Copilot error:', err);
                     addMsg('Gagal menghubungi server. Periksa koneksi Anda.', 'bot', false, true);
                 })
@@ -1110,14 +1186,18 @@
 
             if (isHtml) {
                 div.innerHTML = content;
-                // Inject CSV download button after each table
+                // Wrap tables in scrollable container + inject CSV button
                 var tables = div.querySelectorAll('table');
                 tables.forEach(function (tbl, idx) {
+                    var wrap = document.createElement('div');
+                    wrap.className = 'copilot-table-wrap';
+                    tbl.parentNode.insertBefore(wrap, tbl);
+                    wrap.appendChild(tbl);
                     var btn = document.createElement('button');
                     btn.className = 'copilot-csv-btn';
                     btn.innerHTML = '📥 Download CSV';
                     btn.onclick = function () { copilotExportCSV(tbl); };
-                    tbl.parentNode.insertBefore(btn, tbl.nextSibling);
+                    wrap.parentNode.insertBefore(btn, wrap.nextSibling);
                 });
                 // Detect and render ```chart code blocks
                 var chartBlocks = div.querySelectorAll('code.language-chart');

@@ -1,29 +1,32 @@
+<?php if (!defined('BASEPATH'))
+	exit('No direct script access allowed');
 
-<?php if ( ! defined('BASEPATH')) exit('No direct script access allowed');
+class Analisa extends CI_Controller
+{
 
-class Analisa extends CI_Controller {
-
-	function __construct() {
+	function __construct()
+	{
 		parent::__construct();
 
 		$this->load->model('m_analisa');
 	}
 
 
-	function kalimeneng($tmaInput) {
+	function kalimeneng($tmaInput)
+	{
 		$data = [
-			['TMA' => 0.3,  'Cd' => 1.185, 'Bef' => 29.674],
+			['TMA' => 0.3, 'Cd' => 1.185, 'Bef' => 29.674],
 			['TMA' => 0.35, 'Cd' => 1.185, 'Bef' => 29.721],
-			['TMA' => 0.4,  'Cd' => 1.185, 'Bef' => 29.708],
-			['TMA' => 0.5,  'Cd' => 1.185, 'Bef' => 29.692],
-			['TMA' => 0.6,  'Cd' => 1.322, 'Bef' => 29.668],
-			['TMA' => 1.0,  'Cd' => 1.322, 'Bef' => 29.608],
-			['TMA' => 1.5,  'Cd' => 1.394, 'Bef' => 29.5],
-			['TMA' => 2.0,  'Cd' => 1.415, 'Bef' => 29.46],
-			['TMA' => 2.5,  'Cd' => 1.414, 'Bef' => 29.26],
-			['TMA' => 3.0,  'Cd' => 1.394, 'Bef' => 29.14],
-			['TMA' => 3.5,  'Cd' => 1.389, 'Bef' => 29.14],
-			['TMA' => 7.5,  'Cd' => 1.389, 'Bef' => 29.02],
+			['TMA' => 0.4, 'Cd' => 1.185, 'Bef' => 29.708],
+			['TMA' => 0.5, 'Cd' => 1.185, 'Bef' => 29.692],
+			['TMA' => 0.6, 'Cd' => 1.322, 'Bef' => 29.668],
+			['TMA' => 1.0, 'Cd' => 1.322, 'Bef' => 29.608],
+			['TMA' => 1.5, 'Cd' => 1.394, 'Bef' => 29.5],
+			['TMA' => 2.0, 'Cd' => 1.415, 'Bef' => 29.46],
+			['TMA' => 2.5, 'Cd' => 1.414, 'Bef' => 29.26],
+			['TMA' => 3.0, 'Cd' => 1.394, 'Bef' => 29.14],
+			['TMA' => 3.5, 'Cd' => 1.389, 'Bef' => 29.14],
+			['TMA' => 7.5, 'Cd' => 1.389, 'Bef' => 29.02],
 		];
 
 		$K = 1.705;
@@ -55,7 +58,8 @@ class Analisa extends CI_Controller {
 	}
 
 
-	function debit_interpolation($x) {
+	function debit_interpolation($x)
+	{
 		$data = [
 			[0.20, 12.60],
 			[0.40, 17.82],
@@ -114,7 +118,8 @@ class Analisa extends CI_Controller {
 		return $y;
 	}
 
-	function linear_interpolation($x) {
+	function linear_interpolation($x)
+	{
 		$data = [
 			[10, 0.251],
 			[20, 1.005],
@@ -230,36 +235,40 @@ class Analisa extends CI_Controller {
 	public function pilihpos()
 	{
 		$data = array();
-		if($this->session->userdata('id_user') =='2'){
+		if ($this->session->userdata('id_user') == '2') {
 			$q_pos = $this->db->query("SELECT * FROM t_logger INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi where user_id = 2 order by id_logger asc");
-		}else{
+		} else {
 			$q_pos = $this->db->query("SELECT * FROM t_logger INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi  order by id_logger asc");
 		}
 		foreach ($q_pos->result() as $pos) {
 			$data[] = array(
-				'idLogger' => $pos->id_logger.'_'.'bbws', 'namaPos' => $pos->nama_lokasi
+				'idLogger' => $pos->id_logger . '_' . 'bbws',
+				'namaPos' => $pos->nama_lokasi
 			);
 		}
 		$data_bbws = json_encode($data);
 		$data_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/api_pilihpos'));
-		
-		$data_pos = (array_merge(json_decode($data_bbws),$data_psda));
-		
+
+		$data_pos = (array_merge(json_decode($data_bbws), $data_psda));
+
 		usort($data_pos, function ($a, $b) {
-			
+
 			return strcmp($a->idLogger, $b->idLogger);
 		});
 		$pos_all = json_encode($data_pos);
 		return json_decode($pos_all);
-		
+
 	}
 
-	public function pilihparameter($idlogger){
+	public function pilihparameter($idlogger)
+	{
 		$data = array();
 		$q_parameter = $this->db->query("SELECT * FROM parameter_sensor where logger_id='" . $idlogger . "' ORDER BY CAST(SUBSTRING(kolom_sensor,7) AS UNSIGNED)");
 		foreach ($q_parameter->result() as $param) {
 			$data[] = array(
-				'idParameter' => $param->id_param, 'namaParameter' => $param->nama_parameter, 'fieldParameter' => $param->kolom_sensor
+				'idParameter' => $param->id_param,
+				'namaParameter' => $param->nama_parameter,
+				'fieldParameter' => $param->kolom_sensor
 			);
 		}
 		$data_param = json_encode($data);
@@ -270,75 +279,78 @@ class Analisa extends CI_Controller {
 	function set_sensordash()
 	{
 		$idparam = $this->input->get('id_param');
-		$id_param_only = explode('_',$idparam)[0];
-		$aset = explode('_',$idparam)[1];
-		if($aset == 'bbws'){
+		$id_param_only = explode('_', $idparam)[0];
+		$aset = explode('_', $idparam)[1];
+		if ($aset == 'bbws') {
 			$param_data = $this->db->join('t_logger', 't_logger.id_logger = parameter_sensor.logger_id')->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')->where('parameter_sensor.id_param', $idparam)->get('parameter_sensor')->row();
 
 			$params = [
-				'idlogger'       => $param_data->logger_id . '_'.$aset,
-				'id_param'       => $id_param_only,
-				'data'           => 'hari',
-				'pada'           => date('Y-m-d'),
-				'dari'           => '2025-09-01 00:00:00',
-				'sampai'         => '2025-09-16 23:59:59'
+				'idlogger' => $param_data->logger_id . '_' . $aset,
+				'id_param' => $id_param_only,
+				'data' => 'hari',
+				'pada' => date('Y-m-d'),
+				'dari' => '2025-09-01 00:00:00',
+				'sampai' => '2025-09-16 23:59:59'
 			];
-		}else{
+		} else {
 			$param_data = $this->db->join('t_logger', 't_logger.id_logger = parameter_sensor.logger_id')->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')->where('parameter_sensor.id_param', $idparam)->get('parameter_sensor')->row();
 
 			$params = [
-				'idlogger'       => $this->input->get('id_logger'). '_'.$aset,
-				'id_param'       => $id_param_only,
-				'data'           => 'hari',
-				'pada'           => date('Y-m-d'),
-				'dari'           => '2025-09-01 00:00:00',
-				'sampai'         => '2025-09-16 23:59:59'
+				'idlogger' => $this->input->get('id_logger') . '_' . $aset,
+				'id_param' => $id_param_only,
+				'data' => 'hari',
+				'pada' => date('Y-m-d'),
+				'dari' => '2025-09-01 00:00:00',
+				'sampai' => '2025-09-16 23:59:59'
 			];
 		}
-		
+
 		$enc = $this->encrypt_param($params);
 		redirect("analisa/data/$enc");
 	}
 
-	private function _param_belongs_to_logger($id_param, $id_logger) {
-		$logger_id = explode('_',$id_logger)[0];
-		$aset = explode('_',$id_logger)[1];
-		
-		if($aset == 'bbws'){
+	private function _param_belongs_to_logger($id_param, $id_logger)
+	{
+		$logger_id = explode('_', $id_logger)[0];
+		$aset = explode('_', $id_logger)[1];
+
+		if ($aset == 'bbws') {
 			return (bool) $this->db->where('id_param', $id_param)
 				->where('logger_id', $logger_id)
 				->count_all_results('parameter_sensor');
-		}else{
-			$hasil = file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/param_belongs_to_logger?id_param='.$id_param.'&id_logger='.$logger_id);
+		} else {
+			$hasil = file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/param_belongs_to_logger?id_param=' . $id_param . '&id_logger=' . $logger_id);
 			return $hasil;
 		}
-	
+
 	}
 
-	private function _get_default_param_for_logger($id_logger) {
-		$logger_id = explode('_',$id_logger)[0];
-		$aset = explode('_',$id_logger)[1];
-		if($aset == 'bbws'){
+	private function _get_default_param_for_logger($id_logger)
+	{
+		$logger_id = explode('_', $id_logger)[0];
+		$aset = explode('_', $id_logger)[1];
+		if ($aset == 'bbws') {
 			$row = $this->db->where('logger_id', $logger_id)
-				->order_by('id_param', 'ASC')   
+				->order_by('id_param', 'ASC')
 				->limit(1)
 				->get('parameter_sensor')
 				->row();
 			return $row ? $row->id_param : null;
-		}else{
-			$hasil = file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/get_default_param_for_logger/'.$logger_id);
+		} else {
+			$hasil = file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/get_default_param_for_logger/' . $logger_id);
 			return $hasil;
 		}
-		
+
 	}
 
-	function encrypt_param($array) {
+	function encrypt_param($array)
+	{
 		$key = "gantengbanget";
 		$alias = [
 			'l' => $array['idlogger'] ?? '',
 			'p' => $array['id_param'] ?? '',
 			'm' => $array['data'] ?? '',
-			
+
 			't' => $array['pada'] ?? '',
 			'f' => $array['dari'] ?? '',
 			's' => $array['sampai'] ?? ''
@@ -349,48 +361,52 @@ class Analisa extends CI_Controller {
 		return rtrim(strtr(base64_encode($encrypted), '+/', '-_'), '=');
 	}
 
-	function decrypt_param($string) {
+	function decrypt_param($string)
+	{
 		$key = "gantengbanget";
-		$bin  = base64_decode(strtr($string, '-_', '+/'));
+		$bin = base64_decode(strtr($string, '-_', '+/'));
 		$plain = openssl_decrypt($bin, "AES-128-ECB", $key, OPENSSL_RAW_DATA);
 		$json = @gzinflate($plain);
 		$alias = json_decode($json, true);
-		if (!$alias) return null;
+		if (!$alias)
+			return null;
 		return [
 			'idlogger' => $alias['l'] ?? null,
 			'id_param' => $alias['p'] ?? null,
-			'data'     => $alias['m'] ?? null,
-			'pada'     => $alias['t'] ?? null,
-			'dari'     => $alias['f'] ?? null,
-			'sampai'   => $alias['s'] ?? null
+			'data' => $alias['m'] ?? null,
+			'pada' => $alias['t'] ?? null,
+			'dari' => $alias['f'] ?? null,
+			'sampai' => $alias['s'] ?? null
 		];
 	}
 
-	public function set_token () {
+	public function set_token()
+	{
 		$current = [
 			'idlogger' => null,
 			'id_param' => null,
-			'data'     => 'hari',
-			'pada'     => date('Y-m-d'),
-			'dari'     => null,
-			'sampai'   => null,
+			'data' => 'hari',
+			'pada' => date('Y-m-d'),
+			'dari' => null,
+			'sampai' => null,
 		];
 
 		$token = $this->input->post('token', true);
 		if ($token) {
 			$dec = $this->decrypt_param(str_replace(' ', '+', rawurldecode($token)));
-			if (is_array($dec)) $current = array_merge($current, $dec);
+			if (is_array($dec))
+				$current = array_merge($current, $dec);
 
 		}
-		
+
 		$gabungan = explode('_', $this->input->post('id_logger', true));
 		$id_logger_new = $this->input->post('id_logger', true);
-		
-		$id_param_new  = $this->input->post('id_param', true);
-		$mode      = $this->input->post('mode', true);     
-		$pada      = $this->input->post('pada', true);     
-		$dari      = $this->input->post('dari', true);      
-		$sampai    = $this->input->post('sampai', true);    
+
+		$id_param_new = $this->input->post('id_param', true);
+		$mode = $this->input->post('mode', true);
+		$pada = $this->input->post('pada', true);
+		$dari = $this->input->post('dari', true);
+		$sampai = $this->input->post('sampai', true);
 		if ($id_logger_new !== null && $id_logger_new !== '' && $id_logger_new !== $current['idlogger']) {
 			$current['idlogger'] = $id_logger_new;
 			$aset = $gabungan[1];
@@ -403,19 +419,19 @@ class Analisa extends CI_Controller {
 			} else {
 				$current['id_param'] = $this->_get_default_param_for_logger($id_logger_new);
 			}
-			
+
 			if (!$current['id_param']) {
 				show_error('Logger terpilih belum memiliki parameter sensor.', 400);
 				return;
 			}
-		}
-		elseif ($id_param_new) {
+		} elseif ($id_param_new) {
 			$logger_for_check = $current['idlogger'];
 			if ($logger_for_check && $this->_param_belongs_to_logger($id_param_new, $logger_for_check)) {
 				$current['id_param'] = $id_param_new;
 			} else {
 				$fallback = $this->_get_default_param_for_logger($logger_for_check);
-				if ($fallback) $current['id_param'] = $fallback;
+				if ($fallback)
+					$current['id_param'] = $fallback;
 			}
 		}
 		if ($mode) {
@@ -441,150 +457,179 @@ class Analisa extends CI_Controller {
 				case 'range':
 					$current['data'] = 'range';
 					if ($dari && $sampai) {
-						$current['dari']   = $dari;
+						$current['dari'] = $dari;
 						$current['sampai'] = $sampai;
 					} else {
-						$current['dari']   = date('Y-m-d H:i', mktime(date('H'), 0, 0, date('m'), date('d') - 1, date('Y')));
-						$current['sampai'] = date('Y-m-d H:i', mktime(date('H'), 0, 0, date('m'), date('d'),     date('Y')));
+						$current['dari'] = date('Y-m-d H:i', mktime(date('H'), 0, 0, date('m'), date('d') - 1, date('Y')));
+						$current['sampai'] = date('Y-m-d H:i', mktime(date('H'), 0, 0, date('m'), date('d'), date('Y')));
 					}
 
 					$current['pada'] = null;
 					break;
 			}
-		}
-		elseif ($pada) {
+		} elseif ($pada) {
 			$current['pada'] = $pada;
 			$current['dari'] = $current['sampai'] = null;
-		}
-		elseif ($dari || $sampai) {
+		} elseif ($dari || $sampai) {
 			$current['data'] = 'range';
 			$current['dari'] = $dari ?: $current['dari'];
 			$current['sampai'] = $sampai ?: $current['sampai'];
 			$current['pada'] = null;
 		}
 		$enc = $this->encrypt_param($current);
-		redirect('analisa/data/'.$enc);
+		redirect('analisa/data/' . $enc);
 	}
 
-	public function data($string) {
+	public function data($string)
+	{
 		$dec = $this->decrypt_param($string);
 
-		if (!$dec) show_error('Token tidak valid');
+		if (!$dec)
+			show_error('Token tidak valid');
 		$gabungan = isset($dec['idlogger']) ? explode('_', trim($dec['idlogger'])) : null;
-		
+
 		$idLogger = $gabungan[0];
 		$aset = $gabungan[1];
-		
-		$idParam  = isset($dec['id_param']) ? trim($dec['id_param']) : null;
-		$modeData = isset($dec['data']) ? trim($dec['data']) : null;
-		$pada     = isset($dec['pada']) ? trim($dec['pada']) : null;
-		$dari     = isset($dec['dari']) ? trim($dec['dari']) : null;
-		$sampai   = isset($dec['sampai']) ? trim($dec['sampai']) : null;
-		$payload = [];
-		if (!$idLogger) show_error('Parameter tidak lengkap');
-	
-		if($aset == 'bbws'){
-			$dataParam = $this->db->where('id_param', $idParam)->get('parameter_sensor')->row();
-			if (!$dataParam) show_error('Parameter sensor tidak ditemukan');
 
-			$tipeGrafik    = $dataParam->tipe_graf;
-			$kolom         = $dataParam->kolom_sensor;
+		$idParam = isset($dec['id_param']) ? trim($dec['id_param']) : null;
+		$modeData = isset($dec['data']) ? trim($dec['data']) : null;
+		$pada = isset($dec['pada']) ? trim($dec['pada']) : null;
+		$dari = isset($dec['dari']) ? trim($dec['dari']) : null;
+		$sampai = isset($dec['sampai']) ? trim($dec['sampai']) : null;
+		$payload = [];
+		if (!$idLogger)
+			show_error('Parameter tidak lengkap');
+
+		if ($aset == 'bbws') {
+			$dataParam = $this->db->where('id_param', $idParam)->get('parameter_sensor')->row();
+			if (!$dataParam)
+				show_error('Parameter sensor tidak ditemukan');
+
+			$tipeGrafik = $dataParam->tipe_graf;
+			$kolom = $dataParam->kolom_sensor;
 			$namaParameter = $dataParam->nama_parameter;
-			$satuan        = $dataParam->satuan;
+			$satuan = $dataParam->satuan;
 
 			$tb_main = $this->db
-				->join('t_informasi','t_informasi.logger_id = t_logger.id_logger')
-				->join('t_lokasi','t_lokasi.idlokasi = t_logger.lokasi_logger')
-				->join('kategori_logger','kategori_logger.id_katlogger = t_logger.kategori_log')
+				->join('t_informasi', 't_informasi.logger_id = t_logger.id_logger')
+				->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
+				->join('kategori_logger', 'kategori_logger.id_katlogger = t_logger.kategori_log')
 				->where('id_logger', $idLogger)
 				->get('t_logger')->row();
-			if (!$tb_main) show_error('Logger tidak ditemukan');
+			if (!$tb_main)
+				show_error('Logger tidak ditemukan');
 
-			$foto_pos   = $this->db->where('id_logger', $idLogger)->get('foto_pos')->result_array();
+			$foto_pos = $this->db->where('id_logger', $idLogger)->get('foto_pos')->result_array();
 			$riwayat_op = $this->db->where('id_logger', $idLogger)->get('t_riwayat')->result_array();
 
-			$data = []; $data_tabel = []; $range = [];
+			$data = [];
+			$data_tabel = [];
+			$range = [];
 
 			$nama_sensor = ($tipeGrafik === 'column') ? ('Akumulasi_' . $namaParameter) : ('Rerata_' . $namaParameter);
-			$selectAgg   = ($tipeGrafik === 'column') ? "SUM($kolom) AS $nama_sensor" : "AVG($kolom) AS $nama_sensor";
+			$selectAgg = ($tipeGrafik === 'column') ? "SUM($kolom) AS $nama_sensor" : "AVG($kolom) AS $nama_sensor";
 
 			if ($modeData === 'hari') {
-				$start  = $pada . ' 00:00:00';
-				$end    = $pada . ' 23:59:59';
+				$start = $pada . ' 00:00:00';
+				$end = $pada . ' 23:59:59';
 				$select = "avg(sensor2) as tma,max(sensor2) as tma_max,min(sensor2) as tma_min,AVG(sensor1 - sensor2) AS avg_diff, MIN(sensor1 - sensor2) AS min_diff, MAX(sensor1 - sensor2) AS max_diff, waktu, HOUR(waktu) AS jam, DAY(waktu) AS hari, MONTH(waktu) AS bulan, YEAR(waktu) AS tahun, $selectAgg, MIN($kolom) AS min, MAX($kolom) AS max";
-				$group  = "YEAR(waktu), MONTH(waktu), DAY(waktu), HOUR(waktu)";
-				$order  = "tahun ASC, bulan ASC, hari ASC, jam ASC";
-				$fmtTbl = function($r,$h,$min,$max){ return [
-					'waktu' => date('H', strtotime($r->waktu)) . ':00:00',
-					'dta'   => number_format($h, 2, '.', ''),
-					'min'   => number_format($min, 2, '.', ''),
-					'max'   => number_format($max, 2, '.', '')
-				];};
-				$fmtPoint = function($r,$val){ return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari,$r->jam)," . number_format($val, 3, '.', '') . "]"; };
-				$fmtRange = function($r,$min,$max){ return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari,$r->jam)," . $min . "," . $max . "]"; };
-				$tooltip  = "Waktu %d-%m-%Y %H:%M";
+				$group = "YEAR(waktu), MONTH(waktu), DAY(waktu), HOUR(waktu)";
+				$order = "tahun ASC, bulan ASC, hari ASC, jam ASC";
+				$fmtTbl = function ($r, $h, $min, $max) {
+					return [
+						'waktu' => date('H', strtotime($r->waktu)) . ':00:00',
+						'dta' => number_format($h, 2, '.', ''),
+						'min' => number_format($min, 2, '.', ''),
+						'max' => number_format($max, 2, '.', '')
+					];
+				};
+				$fmtPoint = function ($r, $val) {
+					return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari,$r->jam)," . number_format($val, 3, '.', '') . "]";
+				};
+				$fmtRange = function ($r, $min, $max) {
+					return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari,$r->jam)," . $min . "," . $max . "]";
+				};
+				$tooltip = "Waktu %d-%m-%Y %H:%M";
 			} elseif ($modeData === 'bulan') {
-				$start  = $pada . '-01 00:00:00';
-				$end    = date('Y-m-t 23:59:59', strtotime($pada . '-01'));
+				$start = $pada . '-01 00:00:00';
+				$end = date('Y-m-t 23:59:59', strtotime($pada . '-01'));
 				$select = "avg(sensor2) as tma,max(sensor2) as tma_max,min(sensor2) as tma_min,AVG(sensor1 - sensor2) AS avg_diff, MIN(sensor1 - sensor2) AS min_diff, MAX(sensor1 - sensor2) AS max_diff, waktu, DATE(waktu) AS tanggal, DAY(waktu) AS hari, MONTH(waktu) AS bulan, YEAR(waktu) AS tahun, $selectAgg, MIN($kolom) AS min, MAX($kolom) AS max";
-				$group  = "YEAR(waktu), MONTH(waktu), DAY(waktu)";
-				$order  = "tahun ASC, bulan ASC, hari ASC";
-				$fmtTbl = function($r,$h,$min,$max){ return [
-					'waktu' => date('Y-m-d', strtotime($r->waktu)),
-					'dta'   => number_format($h, 2, '.', ''),
-					'min'   => number_format($min, 2, '.', ''),
-					'max'   => number_format($max, 2, '.', '')
-				];};
-				$fmtPoint = function($r,$val){ return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari)," . number_format($val, 3, '.', '') . "]"; };
-				$fmtRange = function($r,$min,$max){ return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari)," . $min . "," . $max . "]"; };
-				$tooltip  = "Tanggal %d-%m-%Y";
+				$group = "YEAR(waktu), MONTH(waktu), DAY(waktu)";
+				$order = "tahun ASC, bulan ASC, hari ASC";
+				$fmtTbl = function ($r, $h, $min, $max) {
+					return [
+						'waktu' => date('Y-m-d', strtotime($r->waktu)),
+						'dta' => number_format($h, 2, '.', ''),
+						'min' => number_format($min, 2, '.', ''),
+						'max' => number_format($max, 2, '.', '')
+					];
+				};
+				$fmtPoint = function ($r, $val) {
+					return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari)," . number_format($val, 3, '.', '') . "]";
+				};
+				$fmtRange = function ($r, $min, $max) {
+					return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari)," . $min . "," . $max . "]";
+				};
+				$tooltip = "Tanggal %d-%m-%Y";
 			} elseif ($modeData === 'tahun') {
-				$start  = $pada . '-01-01 00:00:00';
-				$end    = $pada . '-12-31 23:59:59';
+				$start = $pada . '-01-01 00:00:00';
+				$end = $pada . '-12-31 23:59:59';
 				$select = "avg(sensor2) as tma,max(sensor2) as tma_max,min(sensor2) as tma_min,AVG(sensor1 - sensor2) AS avg_diff, MIN(sensor1 - sensor2) AS min_diff, MAX(sensor1 - sensor2) AS max_diff, DATE(waktu) AS tanggal, MONTH(waktu) AS bulan, YEAR(waktu) AS tahun, $selectAgg, MIN($kolom) AS min, MAX($kolom) AS max";
-				$group  = "YEAR(waktu), MONTH(waktu)";
-				$order  = "tahun ASC, bulan ASC";
-				$fmtTbl = function($r,$h,$min,$max){ return [
-					'waktu' => date('Y-m', strtotime($r->tanggal)),
-					'dta'   => number_format($h, 2, '.', ''),
-					'min'   => number_format($min, 2, '.', ''),
-					'max'   => number_format($max, 2, '.', '')
-				];};
-				$fmtPoint = function($r,$val){ return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ")," . number_format($val, 3, '.', '') . "]"; };
-				$fmtRange = function($r,$min,$max){ return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ")," . $min . "," . $max . "]"; };
-				$tooltip  = "Tanggal %d-%m-%Y";
+				$group = "YEAR(waktu), MONTH(waktu)";
+				$order = "tahun ASC, bulan ASC";
+				$fmtTbl = function ($r, $h, $min, $max) {
+					return [
+						'waktu' => date('Y-m', strtotime($r->tanggal)),
+						'dta' => number_format($h, 2, '.', ''),
+						'min' => number_format($min, 2, '.', ''),
+						'max' => number_format($max, 2, '.', '')
+					];
+				};
+				$fmtPoint = function ($r, $val) {
+					return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ")," . number_format($val, 3, '.', '') . "]";
+				};
+				$fmtRange = function ($r, $min, $max) {
+					return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ")," . $min . "," . $max . "]";
+				};
+				$tooltip = "Tanggal %d-%m-%Y";
 			} else {
-				$start  = $dari;
-				$end    = $sampai;
+				$start = $dari;
+				$end = $sampai;
 				$select = "avg(sensor2) as tma,max(sensor2) as tma_max,min(sensor2) as tma_min,AVG(sensor1 - sensor2) AS avg_diff, MIN(sensor1 - sensor2) AS min_diff, MAX(sensor1 - sensor2) AS max_diff, waktu, DATE(waktu) AS tanggal, HOUR(waktu) AS jam, DAY(waktu) AS hari, MONTH(waktu) AS bulan, YEAR(waktu) AS tahun, $selectAgg, MIN($kolom) AS min, MAX($kolom) AS max";
-				$group  = "YEAR(waktu), MONTH(waktu), DAY(waktu), HOUR(waktu)";
-				$order  = "tahun ASC, bulan ASC, hari ASC, jam ASC";
-				$fmtTbl = function($r,$h,$min,$max){ return [
-					'waktu' => date('Y-m-d H', strtotime($r->waktu)) . ':00:00',
-					'dta'   => number_format($h, 3, '.', ''),
-					'min'   => number_format($min, 2, '.', ''),
-					'max'   => number_format($max, 2, '.', '')
-				];};
-				$fmtPoint = function($r,$val){ return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari,$r->jam)," . number_format($val, 3, '.', '') . "]"; };
-				$fmtRange = function($r,$min,$max){ return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari,$r->jam)," . $min . "," . $max . "]"; };
-				$tooltip  = "Waktu %d-%m-%Y %H:%M";
+				$group = "YEAR(waktu), MONTH(waktu), DAY(waktu), HOUR(waktu)";
+				$order = "tahun ASC, bulan ASC, hari ASC, jam ASC";
+				$fmtTbl = function ($r, $h, $min, $max) {
+					return [
+						'waktu' => date('Y-m-d H', strtotime($r->waktu)) . ':00:00',
+						'dta' => number_format($h, 3, '.', ''),
+						'min' => number_format($min, 2, '.', ''),
+						'max' => number_format($max, 2, '.', '')
+					];
+				};
+				$fmtPoint = function ($r, $val) {
+					return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari,$r->jam)," . number_format($val, 3, '.', '') . "]";
+				};
+				$fmtRange = function ($r, $min, $max) {
+					return "[ Date.UTC($r->tahun," . ($r->bulan - 1) . ",$r->hari,$r->jam)," . $min . "," . $max . "]";
+				};
+				$tooltip = "Waktu %d-%m-%Y %H:%M";
 			}
 
 			$sql = "SELECT $select FROM {$tb_main->tabel_main} WHERE code_logger=? AND waktu BETWEEN ? AND ? GROUP BY $group ORDER BY $order";
-			$q   = $this->db->query($sql, [$idLogger, $start, $end]);
+			$q = $this->db->query($sql, [$idLogger, $start, $end]);
 			$akumulasi_hujan = 0;
 			foreach ($q->result() as $r) {
-				$h        = $r->$nama_sensor;
+				$h = $r->$nama_sensor;
 				$min_data = $r->min;
 				$max_data = $r->max;
 
 				if ($namaParameter === 'Debit' && $idLogger === '10063') {
 					if ($h < 0 || $min_data < 0 || $max_data < 0) {
-						$h        = max(0, $h);
+						$h = max(0, $h);
 						$min_data = max(0, $min_data);
 						$max_data = max(0, $max_data);
 					} else {
-						$h        = $this->kalimeneng($r->$nama_sensor);
+						$h = $this->kalimeneng($r->$nama_sensor);
 						$min_data = $this->kalimeneng($r->min);
 						$max_data = $this->kalimeneng($r->max);
 					}
@@ -592,60 +637,60 @@ class Analisa extends CI_Controller {
 					$avg_debit = $this->debit_interpolation(($r->avg_diff));
 					$min_debit = $this->debit_interpolation(($r->min_diff));
 					$max_debit = $this->debit_interpolation(($r->max_diff));
-					$h        = $avg_debit;
+					$h = $avg_debit;
 					$min_data = $min_debit;
 					$max_data = $max_debit;
-				}elseif ($namaParameter === 'Debit' and $idLogger === '10249') {
+				} elseif ($namaParameter === 'Debit' and $idLogger === '10249') {
 					$tma = $r->tma * 100;
 					$tma_min = $r->tma_min * 100;
 					$tma_max = $r->tma_max * 100;
 					$avg_debit = $this->linear_interpolation($tma) * $h;
-					$min_debit = $this->linear_interpolation($tma_min)* $min_data;
-					$max_debit = $this->linear_interpolation($tma_max)* $max_data;
-					$h        = $avg_debit;
+					$min_debit = $this->linear_interpolation($tma_min) * $min_data;
+					$max_debit = $this->linear_interpolation($tma_max) * $max_data;
+					$h = $avg_debit;
 					$min_data = $min_debit;
 					$max_data = $max_debit;
-				}elseif ($namaParameter === 'Luas_Penampang_Basah' and $idLogger === '10249') {
+				} elseif ($namaParameter === 'Luas_Penampang_Basah' and $idLogger === '10249') {
 					$tma = $r->tma * 100;
 					$tma_min = $r->tma_min * 100;
 					$tma_max = $r->tma_max * 100;
 					$avg_debit = $this->linear_interpolation($tma);
 					$min_debit = $this->linear_interpolation($tma_min);
 					$max_debit = $this->linear_interpolation($tma_max);
-					$h        = $avg_debit;
+					$h = $avg_debit;
 					$min_data = $min_debit;
 					$max_data = $max_debit;
 				}
-				if($tipeGrafik == 'column'){
+				if ($tipeGrafik == 'column') {
 					$akumulasi_hujan += $h;
 				}
-				$data[]       = $fmtPoint($r, $h);
-				$range[]      = $fmtRange($r, $min_data, $max_data);
+				$data[] = $fmtPoint($r, $h);
+				$range[] = $fmtRange($r, $min_data, $max_data);
 				$data_tabel[] = $fmtTbl($r, $h, $min_data, $max_data);
 			}
 
 			$dataAnalisa = [
-				'idParam'     => $idParam,
-				'idLogger'    => $idLogger,
-				'namaSensor'  => $nama_sensor,
-				'satuan'      => $satuan,
+				'idParam' => $idParam,
+				'idLogger' => $idLogger,
+				'namaSensor' => $nama_sensor,
+				'satuan' => $satuan,
 				'tipe_grafik' => $tipeGrafik,
-				'data'        => $data,
-				'data_tabel'  => $data_tabel,
-				'nosensor'    => $kolom,
-				'range'       => $range,
-				'tooltip'     => $tooltip,
-				'tooltipper'  => $tooltip,
-				'mode_data'   => $modeData,
-				'pada'        => $pada,
-				'dari'        => $dari,
-				'sampai'      => $sampai,
-				'akumulasi_hujan'      => $akumulasi_hujan,
+				'data' => $data,
+				'data_tabel' => $data_tabel,
+				'nosensor' => $kolom,
+				'range' => $range,
+				'tooltip' => $tooltip,
+				'tooltipper' => $tooltip,
+				'mode_data' => $modeData,
+				'pada' => $pada,
+				'dari' => $dari,
+				'sampai' => $sampai,
+				'akumulasi_hujan' => $akumulasi_hujan,
 			];
 
-			$qstatus = $this->db->where('code_logger',$idLogger)->get($tb_main->temp_data)->row();
-			$awal    = date('Y-m-d H:i', (mktime(date('H')-1)));
-			$waktu   = $qstatus->waktu ?? null;
+			$qstatus = $this->db->where('code_logger', $idLogger)->get($tb_main->temp_data)->row();
+			$awal = date('Y-m-d H:i', (mktime(date('H') - 1)));
+			$waktu = $qstatus->waktu ?? null;
 
 			if ($waktu && $waktu >= $awal) {
 				$color = "green";
@@ -655,358 +700,435 @@ class Analisa extends CI_Controller {
 				$status_logger = "Koneksi Terputus";
 			}
 
-			$perbaikan = $this->db->get_where('t_perbaikan', ['id_logger'=> $idLogger])->row();
+			$perbaikan = $this->db->get_where('t_perbaikan', ['id_logger' => $idLogger])->row();
 			if ($perbaikan) {
 				$stts = '1';
 				$status_logger = "Perbaikan";
 			} else {
 				$stts = '0';
 			}
-			
-			$payload['informasi']        = $tb_main;
-			
-			$payload['data_sensor']      = json_decode(json_encode($dataAnalisa));
-			$payload['data_op']          = $riwayat_op;
-			$payload['foto_pos']         = $foto_pos ?: [];
-			$payload['pilih_pos']        = $this->pilihpos();
-			$payload['pilih_parameter']  = $this->pilihparameter($idLogger);
-			
+
+			$payload['informasi'] = $tb_main;
+
+			$payload['data_sensor'] = json_decode(json_encode($dataAnalisa));
+			$payload['data_op'] = $riwayat_op;
+			$payload['foto_pos'] = $foto_pos ?: [];
+			$payload['pilih_pos'] = $this->pilihpos();
+			$payload['pilih_parameter'] = $this->pilihparameter($idLogger);
+
 			$payload['temp_data'] = [
-				'nama_lokasi'   => $tb_main->nama_lokasi,
-				'color'         => $color,
+				'nama_lokasi' => $tb_main->nama_lokasi,
+				'color' => $color,
 				'status_logger' => $status_logger,
-				'stts'          => $stts,
+				'stts' => $stts,
 			];
-		}else{
+		} else {
 			if ($modeData === 'hari') {
-				$data_psda= json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/analisapertanggal2?idsensor='.$idParam.'&tanggal='.$pada));
-			}elseif($modeData === 'bulan'){
-				$data_psda= json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/analisaperbulan2?idsensor='.$idParam.'&tanggal='.$pada));
-			}elseif($modeData === 'tahun'){
-				$data_psda= json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/analisapertahun2?idsensor='.$idParam.'&tahun='.$pada));
-			}elseif($modeData === 'range'){
+				$data_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/analisapertanggal2?idsensor=' . $idParam . '&tanggal=' . $pada));
+			} elseif ($modeData === 'bulan') {
+				$data_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/analisaperbulan2?idsensor=' . $idParam . '&tanggal=' . $pada));
+			} elseif ($modeData === 'tahun') {
+				$data_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/analisapertahun2?idsensor=' . $idParam . '&tahun=' . $pada));
+			} elseif ($modeData === 'range') {
 				$dari = urlencode($dari);
 				$sampai = urlencode($sampai);
-				$data_psda= json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/analisaperrange2?idsensor='.$idParam.'&dari='.$dari.'&sampai='.$sampai));
-				
+				$data_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/analisaperrange2?idsensor=' . $idParam . '&dari=' . $dari . '&sampai=' . $sampai));
+
 			}
-			$payload['informasi']        = $data_psda->informasi;
-			$payload['data_sensor']      = json_decode(json_encode($data_psda->data_sensor));
-			$payload['data_op']          = [];
-			$payload['foto_pos']         = [];
-			$payload['pilih_pos']        = $this->pilihpos();
-			$payload['pilih_parameter']  = $data_psda->pilih_parameter;
-			
+			$payload['informasi'] = $data_psda->informasi;
+			$payload['data_sensor'] = json_decode(json_encode($data_psda->data_sensor));
+			$payload['data_op'] = [];
+			$payload['foto_pos'] = [];
+			$payload['pilih_pos'] = $this->pilihpos();
+			$payload['pilih_parameter'] = $data_psda->pilih_parameter;
+
 			$payload['temp_data'] = json_decode(json_encode($data_psda->temp_data), true);
 		}
-		$payload['token']        = $string;
-		$payload['konten']           = 'konten/back/analisa_all';
+		$payload['token'] = $string;
+		$payload['konten'] = 'konten/back/analisa_all';
 
 		$this->load->view('template_admin/site', $payload);
-	} 
+	}
 
 
 	public function index()
 	{
-		if($this->session->userdata('logged_in'))
-		{
+		if ($this->session->userdata('logged_in')) {
 			$this->load->library('googlemaps');
 			$id_kategori = $this->session->userdata('id_kategori');
+
+			// ── Batch-load: satu kali query untuk data referensi ──
 			$ktg = $this->db->get('kategori_logger')->result_array();
+			$data['ktg_all'] = $ktg; // re-use, tidak perlu query ulang
 
-			$data['ktg_all'] = $this->db->get('kategori_logger')->result_array();
+			// Batch-load t_perbaikan → map by id_logger
+			$perbaikan_map = [];
+			foreach ($this->db->get('t_perbaikan')->result() as $p) {
+				$perbaikan_map[$p->id_logger] = $p;
+			}
+
+			// Batch-load parameter_sensor → map by logger_id (sorted)
+			$all_params = $this->db->order_by("CAST(SUBSTR(kolom_sensor,7) AS UNSIGNED)")->get('parameter_sensor')->result_array();
+			$param_map = [];       // logger_id => [params...]
+			$param_utama_map = []; // logger_id => first row with parameter_utama=1
+			$sensor9_logger_map = []; // logger_id => true (has sensor9 column)
+			foreach ($all_params as $prm) {
+				$param_map[$prm['logger_id']][] = $prm;
+				if ($prm['parameter_utama'] == '1' && !isset($param_utama_map[$prm['logger_id']])) {
+					$param_utama_map[$prm['logger_id']] = (object) $prm;
+				}
+				if ($prm['kolom_sensor'] == 'sensor9') {
+					$sensor9_logger_map[$prm['logger_id']] = true;
+				}
+			}
+
+			// Batch-load foto_pos → map by id_logger (first row only)
+			$foto_map = [];
+			foreach ($this->db->get('foto_pos')->result() as $f) {
+				if (!isset($foto_map[$f->id_logger])) {
+					$foto_map[$f->id_logger] = $f;
+				}
+			}
+
+			// Batch-load temp_data per distinct tabel temp_data
+			$temp_data_map = []; // tabel => code_logger => row
+			$distinct_temp_tables = [];
+			foreach ($ktg as $k) {
+				$distinct_temp_tables[$k['temp_data']] = true;
+			}
+			foreach (array_keys($distinct_temp_tables) as $tbl) {
+				$temp_data_map[$tbl] = [];
+				foreach ($this->db->get($tbl)->result() as $r) {
+					$temp_data_map[$tbl][$r->code_logger] = $r;
+				}
+			}
+
+			// Batch-load SUM akumulasi per distinct tabel_main
+			$jam_sekarang = date('Y-m-d H') . ':00';
+			$akumulasi_map = []; // tabel_main => code_logger => {sensor8, sensor9}
+			// Collect distinct tabel_main from logger query
+			$all_loggers_raw = $this->db->query("SELECT DISTINCT tabel_main FROM t_logger WHERE tabel_main IS NOT NULL AND tabel_main != ''")->result();
+			foreach ($all_loggers_raw as $row) {
+				$tbl_main = $row->tabel_main;
+				if (!$tbl_main)
+					continue;
+				$akumulasi_map[$tbl_main] = [];
+				$aku_rows = $this->db->query("SELECT code_logger, SUM(sensor8) as sensor8, SUM(sensor9) as sensor9 FROM `{$tbl_main}` WHERE waktu >= ? GROUP BY code_logger", [$jam_sekarang])->result();
+				foreach ($aku_rows as $ar) {
+					$akumulasi_map[$tbl_main][$ar->code_logger] = $ar;
+				}
+			}
+
+			$awal = date('Y-m-d H:i', (mktime(date('H') - 1)));
+
+			// ══════════════════════════════════════════════════════
+			// LOOP 1: Data DAS + Logger sidebar
+			// ══════════════════════════════════════════════════════
 			$das = $this->db->get('list_das')->result_array();
-			foreach($das as $key =>$ds){
+			foreach ($das as $key => $ds) {
 				$das[$key]['logger'] = [];
-				$data_logger = $this->db->join('kategori_logger', 't_logger.kategori_log = kategori_logger.id_katlogger')->join('t_lokasi','t_lokasi.idlokasi = t_logger.lokasi_logger')->where('t_lokasi.das',$ds['nama_das'])->order_by('id_logger')->get('t_logger')->result_array();
+				$data_logger = $this->db->join('kategori_logger', 't_logger.kategori_log = kategori_logger.id_katlogger')
+					->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
+					->where('t_lokasi.das', $ds['nama_das'])
+					->order_by('id_logger')
+					->get('t_logger')->result_array();
 
-				foreach ($data_logger as $k=>$log){
-					$tabel=$log['temp_data'];
-					$id_logger=$log['id_logger'];
-					$temp_data = $this->db->where('code_logger',$id_logger)->get($tabel)->row();
-					$cek_perbaikan = $this->db->where('id_logger',$id_logger)->get('t_perbaikan')->row();
+				foreach ($data_logger as $k => $log) {
+					$tabel = $log['temp_data'];
+					$id_logger = $log['id_logger'];
 
-					$awal=date('Y-m-d H:i',(mktime(date('H')-1)));
-					if($temp_data->waktu >= $awal)
-					{
-						$color="green";
-						$status_logger="Koneksi Terhubung";
+					// Lookup dari batch map (bukan query)
+					$temp_data = isset($temp_data_map[$tabel][$id_logger]) ? $temp_data_map[$tabel][$id_logger] : null;
+					$cek_perbaikan = isset($perbaikan_map[$id_logger]) ? $perbaikan_map[$id_logger] : null;
+
+					if ($temp_data && isset($temp_data->waktu) && $temp_data->waktu >= $awal) {
+						$color = "green";
+						$status_logger = "Koneksi Terhubung";
+					} else {
+						$color = "red";
+						$status_logger = "Koneksi Terputus";
 					}
-					else{
-						$color="red";
-						$status_logger="Koneksi Terputus";			
+					if ($cek_perbaikan) {
+						$color = "#A16D28";
+						$status_logger = "Perbaikan";
 					}
-					if($cek_perbaikan){
-						$color="#A16D28";
-						$status_logger="Perbaikan";	
-					}
-					if($temp_data->sensor13 == '1' )
-					{
-						$sdcard='OK';
-					}
-					else{
-						$sdcard='Bermasalah';
+					if ($temp_data && isset($temp_data->sensor13) && $temp_data->sensor13 == '1') {
+						$sdcard = 'OK';
+					} else {
+						$sdcard = 'Bermasalah';
 					}
 
-
-					$param = $this->db->query("SELECT * FROM `parameter_sensor` WHERE logger_id = '$id_logger' ORDER BY CAST(SUBSTR(`kolom_sensor`,7) AS UNSIGNED)")->result_array();
-					foreach($param as $ky => $val) {
-						$get='id_param='.$val['id_param'].'_bbws';
+					// Lookup parameter_sensor dari batch map
+					$param = isset($param_map[$id_logger]) ? $param_map[$id_logger] : [];
+					foreach ($param as $ky => $val) {
+						$get = 'id_param=' . $val['id_param'] . '_bbws';
 						$kolom = $val['kolom_sensor'];
-						$param[$ky]['nilai'] = $temp_data->$kolom;
-						$param[$ky]['link'] = base_url() .'analisa/set_sensordash?'.$get;
+						$param[$ky]['nilai'] = $temp_data ? $temp_data->$kolom : null;
+						$param[$ky]['link'] = base_url() . 'analisa/set_sensordash?' . $get;
 					}
 
 					$das[$key]['logger'][$k] = [
-						'id_logger'=>$id_logger,
-						'nama_lokasi'=>$log['nama_lokasi'],
-						'waktu'=>$temp_data->waktu,
-						'color'=>$color,
-						'status_logger'=>$status_logger,
-						'status_sd'=>$sdcard,
-						'param'=>$param,
+						'id_logger' => $id_logger,
+						'nama_lokasi' => $log['nama_lokasi'],
+						'waktu' => $temp_data ? $temp_data->waktu : null,
+						'color' => $color,
+						'status_logger' => $status_logger,
+						'status_sd' => $sdcard,
+						'param' => $param,
 					];
 				}
 			}
 
-			$kategori=array();
-			$query_kategori=$this->db->query('select * from kategori_logger');
-			//$klasifikasi
+			// ══════════════════════════════════════════════════════
+			// LOOP 2: Data Marker peta
+			// ══════════════════════════════════════════════════════
 			$marker = [];
-			foreach ($query_kategori->result()  as $kat) {
-				$tabel=$kat->tabel;
-				$tabel_temp=$kat->temp_data;
-				$content=array();
+			foreach ($ktg as $kat_arr) {
+				$kat = (object) $kat_arr;
+				$tabel = $kat->tabel;
+				$tabel_temp = $kat->temp_data;
 
-				$query_lokasilogger=$this->db->query("select * from t_logger inner join t_lokasi ON t_logger.lokasi_logger=t_lokasi.idlokasi join kategori_logger on t_logger.kategori_log = kategori_logger.id_katlogger join t_informasi on t_logger.id_logger = t_informasi.logger_id where kategori_log='$kat->id_katlogger' and t_lokasi.das != ''");
-				foreach ($query_lokasilogger->result() as $loklogger){
+				$query_lokasilogger = $this->db->query("SELECT * FROM t_logger INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi JOIN kategori_logger ON t_logger.kategori_log = kategori_logger.id_katlogger JOIN t_informasi ON t_logger.id_logger = t_informasi.logger_id WHERE kategori_log = ? AND t_lokasi.das != ''", [$kat->id_katlogger]);
+
+				foreach ($query_lokasilogger->result() as $loklogger) {
 					$tabel_main = $loklogger->tabel_main;
-					$id_logger=$loklogger->id_logger;
+					$id_logger = $loklogger->id_logger;
 					$icon = $loklogger->tabel;
-					$parameter=array();
-					$id_param = $this->db->where('logger_id',$id_logger)->where('parameter_utama','1')->limit(1)->get('parameter_sensor')->row();
-					
-					$query_data=$this->db->query('select * from '.$tabel_temp.' where code_logger="'.$id_logger.'"')->result();
 
+					// Lookup dari batch map (bukan query)
+					$id_param = isset($param_utama_map[$id_logger]) ? $param_utama_map[$id_logger] : null;
+					$dt = isset($temp_data_map[$tabel_temp][$id_logger]) ? $temp_data_map[$tabel_temp][$id_logger] : null;
+					$perb = isset($perbaikan_map[$id_logger]) ? $perbaikan_map[$id_logger] : null;
+					$has_sensor9 = isset($sensor9_logger_map[$id_logger]);
 
-					foreach ($query_data as $dt){
-						$waktu=$dt->waktu;
-						$awal=date('Y-m-d H:i',(mktime(date('H')-1)));
+					// Default values
+					$waktu = $dt ? $dt->waktu : null;
+					$data_p = 0;
+					$icon_marker = '';
+					$status = '';
+					$statlog = '';
+					$statuspantau = '';
+					$anim = '';
+					$kat_group = '';
+					$controller = '';
+					$status_sd = 'OK';
 
-						if ($icon == 'awlr') {
-							$controller = $kat->controller;
-							$kat_group = 'awlr';
-							$data_p = $dt->sensor1;
-							$perb = $this->db->where('id_logger', $id_logger)->get('t_perbaikan')->row();
-							if ($perb) {
-								$icon_marker = base_url() . 'pin_marker/awlr-iri-coklat.png';
-								$status = '<p style="color:brown;margin-bottom:0px">Perbaikan</p>';
-								$statlog = 'Perbaikan';
-								$statuspantau = "Perbaikan";
-								$anim = "";
-							} else {
-								if ($waktu >= $awal) {
-									$icon_marker = base_url() . 'pin_marker/awlr-iri-hijau.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'Koneksi Terhubung';
-									$statuspantau = "Koneksi Terhubung";
-									$anim = "";
-								} else {
-									$icon_marker = base_url() . 'pin_marker/awlr-iri-hitam.png';
-									$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
-									$statlog = 'Koneksi Terputus';
-									$statuspantau = "Koneksi Terputus";
-									$anim = "google.maps.Animation.BOUNCE";
-								}
-							}
-						} else if ($icon == 'arr') {
-							$controller = 'arr';
-							$kat_group = 'arr';
-							$sen = $this->db->where('kolom_sensor', 'sensor9')->where('logger_id', $id_logger)->get('parameter_sensor')->row();
-							$perb = $this->db->where('id_logger', $id_logger)->get('t_perbaikan')->row();
-							if ($sen) {
-								$query_akumulasi = $this->db->query('select sum(sensor9) as sensor9 from '.$tabel_main.' where code_logger = "' . $id_logger . '" and waktu >= "' . date('Y-m-d H') . ':00" ')->row();
-								$data_p = $query_akumulasi->sensor9;
-							} else {
-								$query_akumulasi = $this->db->query('select sum(sensor8) as sensor8 from '.$tabel_main.' where code_logger = "' . $id_logger . '" and waktu >= "' . date('Y-m-d H') . ':00" ')->row();
-								$data_p = $query_akumulasi->sensor8;
-							}
-
-							if ($perb) {
-								$icon_marker = base_url() . 'pin_marker/arr_coklat.png';
-								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-								$statlog = 'Perbaikan';
-								$statuspantau = "Perbaikan";
-								$anim = "";
-							} else {
-								if ($waktu >= $awal) {
-									if ($data_p <= 0) {
-										$icon_marker = base_url() . 'pin_marker/arr_hijau.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'th';
-										$statuspantau = "Tidak Hujan";
-										$anim = "";
-									} elseif ($data_p >= 0.1 and $data_p < 1) {
-										$icon_marker = base_url() . 'pin_marker/arr_biru.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'sr';
-										$statuspantau = "Hujan Sangat Ringan";
-										$anim = "";
-									} elseif ($data_p >= 1 and $data_p < 5) {
-										$icon_marker = base_url() . 'pin_marker/arr_nila.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'r';
-										$statuspantau = "Hujan Ringan";
-										$anim = "";
-									} elseif ($data_p >= 5 and $data_p < 10) {
-										$icon_marker = base_url() . 'pin_marker/arr_kuning.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 's';
-										$statuspantau = "Hujan Sedang";
-										$anim = "";
-									} elseif ($data_p >= 10 and $data_p < 20) {
-										$icon_marker = base_url() . 'pin_marker/arr_oranye.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'l';
-										$statuspantau = "Hujan Lebat";
-										$anim = "google.maps.Animation.BOUNCE";
-									} elseif ($data_p >= 20) {
-										$icon_marker = base_url() . 'pin_marker/arr_merah.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'sl';
-										$statuspantau = "Hujan Sangat Lebat";
-										$anim = "google.maps.Animation.BOUNCE";
-									}
-									$statlog = 'Koneksi Terhubung';
-								} else {
-									$icon_marker = base_url() . 'pin_marker/arr_hitam.png';
-									$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
-									$statlog = 'Koneksi Terputus';
-									$statuspantau = "Koneksi Terputus";
-									$anim = "google.maps.Animation.BOUNCE";
-								}
-							}
+					if ($icon == 'awlr') {
+						$controller = $kat->controller;
+						$kat_group = 'awlr';
+						$data_p = $dt ? $dt->sensor1 : 0;
+						if ($perb) {
+							$icon_marker = base_url() . 'pin_marker/awlr-iri-coklat.png';
+							$status = '<p style="color:brown;margin-bottom:0px">Perbaikan</p>';
+							$statlog = 'Perbaikan';
+							$statuspantau = "Perbaikan";
+							$anim = "";
 						} else {
-							$controller = $kat->controller;
-							$kat_group = 'awr';
-							$sen = $this->db->where('kolom_sensor', 'sensor9')->where('logger_id', $id_logger)->get('parameter_sensor')->row();
-							$perb = $this->db->where('id_logger', $id_logger)->get('t_perbaikan')->row();
-							if ($sen) {
-								$query_akumulasi = $this->db->query('select sum(sensor9) as sensor9 from '.$tabel_main.' where code_logger = "' . $id_logger . '" and waktu >= "' . date('Y-m-d H') . ':00" ')->row();
-								$data_p = $query_akumulasi->sensor9;
-							} else {
-								$query_akumulasi = $this->db->query('select sum(sensor8) as sensor8 from '.$tabel_main.' where code_logger = "' . $id_logger . '" and waktu >= "' . date('Y-m-d H') . ':00" ')->row();
-								$data_p = $query_akumulasi->sensor8;
-							}
-							if ($perb) {
-								$icon_marker = base_url() . 'pin_marker/awr_coklat.png';
-								$status = '<p style="color:brown;margin-bottom:0px">Koneksi Terputus</p>';
-								$statlog = 'Perbaikan';
-								$statuspantau = "Perbaikan";
+							if ($waktu >= $awal) {
+								$icon_marker = base_url() . 'pin_marker/awlr-iri-hijau.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'Koneksi Terhubung';
+								$statuspantau = "Koneksi Terhubung";
 								$anim = "";
 							} else {
-								if ($waktu >= $awal) {
-									if ($data_p >= 0 and $data_p < 0.1) {
-										$icon_marker = base_url() . 'pin_marker/awr_hijau.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'Koneksi Terhubung';
-										$statuspantau = "Tidak Hujan";
-										$anim = "";
-									} elseif ($data_p >= 0.1 and $data_p < 1) {
-										$icon_marker = base_url() . 'pin_marker/awr_biru.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'Koneksi Terhubung';
-										$statuspantau = "Hujan Sangat Ringan";
-										$anim = "";
-									} elseif ($data_p >= 1 and $data_p < 5) {
-										$icon_marker = base_url() . 'pin_marker/awr_nila.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'Koneksi Terhubung';
-										$statuspantau = "Hujan Ringan";
-										$anim = "";
-									} elseif ($data_p >= 5 and $data_p < 10) {
-										$icon_marker = base_url() . 'pin_marker/awr_kuning.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'Koneksi Terhubung';
-										$statuspantau = "Hujan Sedang";
-										$anim = "";
-									} elseif ($data_p >= 10 and $data_p < 20) {
-										$icon_marker = base_url() . 'pin_marker/awr_oranye.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'Koneksi Terhubung';
-										$statuspantau = "Hujan Lebat";
-										$anim = "google.maps.Animation.BOUNCE";
-									} elseif ($data_p >= 20) {
-										$icon_marker = base_url() . 'pin_marker/awr_merah.png';
-										$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-										$statlog = 'Koneksi Terhubung';
-										$statuspantau = "Hujan Sangat Lebat";
-										$anim = "google.maps.Animation.BOUNCE";
-									}
-								} else {
-									$icon_marker = base_url() . 'pin_marker/awr_hitam.png';
-									$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
-									$statlog = 'Koneksi Terputus';
-									$statuspantau = "Koneksi Terputus";
-									$anim = "google.maps.Animation.BOUNCE";
-								}
+								$icon_marker = base_url() . 'pin_marker/awlr-iri-hitam.png';
+								$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
+								$statlog = 'Koneksi Terputus';
+								$statuspantau = "Koneksi Terputus";
+								$anim = "google.maps.Animation.BOUNCE";
 							}
 						}
-						$status_sd = 'OK';
+					} else if ($icon == 'arr') {
+						$controller = 'arr';
+						$kat_group = 'arr';
 
+						// Lookup akumulasi dari batch map
+						$aku = isset($akumulasi_map[$tabel_main][$id_logger]) ? $akumulasi_map[$tabel_main][$id_logger] : null;
+						if ($has_sensor9) {
+							$data_p = $aku ? $aku->sensor9 : 0;
+						} else {
+							$data_p = $aku ? $aku->sensor8 : 0;
+						}
+
+						if ($perb) {
+							$icon_marker = base_url() . 'pin_marker/arr_coklat.png';
+							$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+							$statlog = 'Perbaikan';
+							$statuspantau = "Perbaikan";
+							$anim = "";
+						} else {
+							if ($waktu >= $awal) {
+								if ($data_p <= 0) {
+									$icon_marker = base_url() . 'pin_marker/arr_hijau.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'th';
+									$statuspantau = "Tidak Hujan";
+									$anim = "";
+								} elseif ($data_p >= 0.1 and $data_p < 1) {
+									$icon_marker = base_url() . 'pin_marker/arr_biru.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'sr';
+									$statuspantau = "Hujan Sangat Ringan";
+									$anim = "";
+								} elseif ($data_p >= 1 and $data_p < 5) {
+									$icon_marker = base_url() . 'pin_marker/arr_nila.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'r';
+									$statuspantau = "Hujan Ringan";
+									$anim = "";
+								} elseif ($data_p >= 5 and $data_p < 10) {
+									$icon_marker = base_url() . 'pin_marker/arr_kuning.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 's';
+									$statuspantau = "Hujan Sedang";
+									$anim = "";
+								} elseif ($data_p >= 10 and $data_p < 20) {
+									$icon_marker = base_url() . 'pin_marker/arr_oranye.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'l';
+									$statuspantau = "Hujan Lebat";
+									$anim = "google.maps.Animation.BOUNCE";
+								} elseif ($data_p >= 20) {
+									$icon_marker = base_url() . 'pin_marker/arr_merah.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'sl';
+									$statuspantau = "Hujan Sangat Lebat";
+									$anim = "google.maps.Animation.BOUNCE";
+								}
+								$statlog = 'Koneksi Terhubung';
+							} else {
+								$icon_marker = base_url() . 'pin_marker/arr_hitam.png';
+								$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
+								$statlog = 'Koneksi Terputus';
+								$statuspantau = "Koneksi Terputus";
+								$anim = "google.maps.Animation.BOUNCE";
+							}
+						}
+					} else {
+						$controller = $kat->controller;
+						$kat_group = 'awr';
+
+						// Lookup akumulasi dari batch map
+						$aku = isset($akumulasi_map[$tabel_main][$id_logger]) ? $akumulasi_map[$tabel_main][$id_logger] : null;
+						if ($has_sensor9) {
+							$data_p = $aku ? $aku->sensor9 : 0;
+						} else {
+							$data_p = $aku ? $aku->sensor8 : 0;
+						}
+
+						if ($perb) {
+							$icon_marker = base_url() . 'pin_marker/awr_coklat.png';
+							$status = '<p style="color:brown;margin-bottom:0px">Koneksi Terputus</p>';
+							$statlog = 'Perbaikan';
+							$statuspantau = "Perbaikan";
+							$anim = "";
+						} else {
+							if ($waktu >= $awal) {
+								if ($data_p >= 0 and $data_p < 0.1) {
+									$icon_marker = base_url() . 'pin_marker/awr_hijau.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'Koneksi Terhubung';
+									$statuspantau = "Tidak Hujan";
+									$anim = "";
+								} elseif ($data_p >= 0.1 and $data_p < 1) {
+									$icon_marker = base_url() . 'pin_marker/awr_biru.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'Koneksi Terhubung';
+									$statuspantau = "Hujan Sangat Ringan";
+									$anim = "";
+								} elseif ($data_p >= 1 and $data_p < 5) {
+									$icon_marker = base_url() . 'pin_marker/awr_nila.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'Koneksi Terhubung';
+									$statuspantau = "Hujan Ringan";
+									$anim = "";
+								} elseif ($data_p >= 5 and $data_p < 10) {
+									$icon_marker = base_url() . 'pin_marker/awr_kuning.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'Koneksi Terhubung';
+									$statuspantau = "Hujan Sedang";
+									$anim = "";
+								} elseif ($data_p >= 10 and $data_p < 20) {
+									$icon_marker = base_url() . 'pin_marker/awr_oranye.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'Koneksi Terhubung';
+									$statuspantau = "Hujan Lebat";
+									$anim = "google.maps.Animation.BOUNCE";
+								} elseif ($data_p >= 20) {
+									$icon_marker = base_url() . 'pin_marker/awr_merah.png';
+									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+									$statlog = 'Koneksi Terhubung';
+									$statuspantau = "Hujan Sangat Lebat";
+									$anim = "google.maps.Animation.BOUNCE";
+								}
+							} else {
+								$icon_marker = base_url() . 'pin_marker/awr_hitam.png';
+								$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
+								$statlog = 'Koneksi Terputus';
+								$statuspantau = "Koneksi Terputus";
+								$anim = "google.maps.Animation.BOUNCE";
+							}
+						}
 					}
-					$get='id_param='.$id_param->id_param.'_bbws';
-					$link =  base_url() .'analisa/set_sensordash?'.$get;
-					$url = $this->db->where('id_logger',$id_logger)->get('foto_pos')->row();
+
+					// Lookup foto_pos dari batch map
+					$get = 'id_param=' . ($id_param ? $id_param->id_param : '') . '_bbws';
+					$link = base_url() . 'analisa/set_sensordash?' . $get;
+					$url = isset($foto_map[$id_logger]) ? $foto_map[$id_logger] : null;
 					$img_pos = '';
-					if($url){
-						$img_pos = '<div class="d-flex w-100 justify-content-center mb-2 mt-3"><div style="background:url(https://bbws.beacontelemetry.com/image/foto_pos/'.$url->url_foto.');width:300px;height:200px;background-size:cover;background-position:center" class"img-fluid"></div></div>';
+					if ($url) {
+						$img_pos = '<div class="d-flex w-100 justify-content-center mb-2 mt-3"><div style="background:url(https://bbws.beacontelemetry.com/image/foto_pos/' . $url->url_foto . ');width:300px;height:200px;background-size:cover;background-position:center" class"img-fluid"></div></div>';
 					}
 					$marker[] = [
-						'nama_das'=>$loklogger->das,
-						'id_kategori'=>$kat->id_katlogger,
-						'id_logger'=>$loklogger->id_logger,
-						'category'=>$kat_group,
-						'status_aset'=>'BBWS Serayu Opak',
-						'category_group'=>$statuspantau,
-						'koneksi'=>$statlog,
-						'status_sd'=>$status_sd,
+						'nama_das' => $loklogger->das,
+						'id_kategori' => $kat->id_katlogger,
+						'id_logger' => $loklogger->id_logger,
+						'category' => $kat_group,
+						'status_aset' => 'BBWS Serayu Opak',
+						'category_group' => $statuspantau,
+						'koneksi' => $statlog,
+						'status_sd' => $status_sd,
 						'latitude' => $loklogger->latitude,
 						'longitude' => $loklogger->longitude,
 						'nama_lokasi' => $loklogger->nama_lokasi,
 						'icon' => $icon_marker,
-						'id_param'=>$id_param->id_param,
-						'link'=>$link,
+						'id_param' => $id_param ? $id_param->id_param : '',
+						'link' => $link,
 						'nama_pic' => $loklogger->nama_pic,
 						'no_pic' => $loklogger->no_pic,
-						'foto_pos'=>$img_pos,
-						'anim'=>$anim
+						'foto_pos' => $img_pos,
+						'anim' => $anim
 					];
 				}
 			}
-			$das_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/peta_lokasi'),true);
+
+			// External API call dengan timeout 5 detik
+			$ctx = stream_context_create(['http' => ['timeout' => 60]]);
+			$das_psda_json = @file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/peta_lokasi', false, $ctx);
+			$das_psda = $das_psda_json ? json_decode($das_psda_json, true) : null;
+			if (!$das_psda || !isset($das_psda['data_konten']) || !isset($das_psda['marker'])) {
+				$das_psda = ['data_konten' => [], 'marker' => []];
+			}
 			$data_das = $das_psda['data_konten'];
 			$data_marker = $das_psda['marker'];
-			
-			foreach($das as $ds=>$vd){
-				if($vd['nama_das'] == 'Progo'){
-					$merger = array_merge($data_das['PROGO']['logger'],$das[$ds]['logger']);
+
+			foreach ($das as $ds => $vd) {
+				if ($vd['nama_das'] == 'Progo' && isset($data_das['PROGO'])) {
+					$merger = array_merge($data_das['PROGO']['logger'], $das[$ds]['logger']);
 					$das[$ds]['logger'] = $merger;
-				}elseif($vd['nama_das'] == 'Opak'){
-					$merger = array_merge($data_das['OPAK-OYO']['logger'],$das[$ds]['logger']);
+				} elseif ($vd['nama_das'] == 'Opak' && isset($data_das['OPAK-OYO'])) {
+					$merger = array_merge($data_das['OPAK-OYO']['logger'], $das[$ds]['logger']);
 					$das[$ds]['logger'] = $merger;
-				}elseif($vd['nama_das'] == 'Serang'){
-					$merger = array_merge($data_das['SERANG']['logger'],$das[$ds]['logger']);
+				} elseif ($vd['nama_das'] == 'Serang' && isset($data_das['SERANG'])) {
+					$merger = array_merge($data_das['SERANG']['logger'], $das[$ds]['logger']);
 					$das[$ds]['logger'] = $merger;
 				}
 			}
-			$data['data_konten']=$das;
+			$data['data_konten'] = $das;
 			$data['das'] = $das;
-			$data['marker'] = array_merge($data_marker,$marker);
-			$this->load->view('konten/back/analisa_geojson',$data);
-		}
-		else
-		{
+			$data['marker'] = array_merge($data_marker, $marker);
+			$this->load->view('konten/back/analisa_geojson', $data);
+		} else {
 			redirect('login');
 		}
 
@@ -1014,11 +1136,11 @@ class Analisa extends CI_Controller {
 
 	function combologger()
 	{
-		$set =explode(',',$this->input->post('id_logger'));
-		$idlogger=$set[0];
-		$controller=$set[1];
-		$tabel=$set[2];
+		$set = explode(',', $this->input->post('id_logger'));
+		$idlogger = $set[0];
+		$controller = $set[1];
+		$tabel = $set[2];
 
-		redirect($controller.'/set_sensorselect/'.$idlogger.'/'.$tabel);
+		redirect($controller . '/set_sensorselect/' . $idlogger . '/' . $tabel);
 	}
 }
