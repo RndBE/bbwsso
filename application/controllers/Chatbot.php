@@ -76,7 +76,7 @@ class Chatbot extends CI_Controller
         $messages[] = ['role' => 'user', 'content' => $message];
 
         // Token management: keep system + last N messages
-        $messages = $this->_trim_messages($messages, 40);
+        $messages = $this->_trim_messages($messages, 20);
 
         // OpenAI tools definition
         $tools = $this->_openai_tools();
@@ -148,6 +148,133 @@ class Chatbot extends CI_Controller
             'session_id' => $sid,
             'reply' => $reply,
             '_debug' => $debug_log
+        ]);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  ASK ENDPOINT — External chatbot integration
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * POST /chatbot/ask
+     * Body: { "uuid": "...", "message": "..." }
+     *
+     * Endpoint penerima dari sistem eksternal (misalnya _ask_bot).
+     * Menggunakan uuid sebagai session_id agar percakapan multi-turn tetap terjaga.
+     * Response: { "message": { "content": "..." } }
+     */
+    public function ask()
+    {
+        // Hanya terima method POST
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            return $this->_json_response([
+                'status' => 'error',
+                'message' => ['content' => 'Method Not Allowed']
+            ]);
+        }
+
+        $input = $this->_json_input();
+        $uuid = isset($input['uuid']) ? trim($input['uuid']) : '';
+        $message = isset($input['message']) ? trim($input['message']) : '';
+
+        // Validasi input
+        if ($uuid === '' || $message === '') {
+            http_response_code(400);
+            return $this->_json_response([
+                'status' => 'error',
+                'message' => ['content' => 'Parameter uuid dan message wajib diisi']
+            ]);
+        }
+
+        // Cek API key
+        $api_key = $this->config->item('openai_api_key', 'openai');
+        if (empty($api_key)) {
+            http_response_code(503);
+            return $this->_json_response([
+                'status' => 'error',
+                'message' => ['content' => 'API key belum dikonfigurasi']
+            ]);
+        }
+
+        $model = $this->config->item('openai_model', 'openai') ?: 'gpt-4o-mini';
+
+        // ── Gunakan uuid sebagai session_id ──
+        $sid = 'ext_' . $uuid;
+        $messages = $this->_load_session($sid);
+
+        if (empty($messages)) {
+            $messages[] = ['role' => 'system', 'content' => $this->_system_prompt()];
+        } else {
+            $messages[0] = ['role' => 'system', 'content' => $this->_system_prompt()];
+        }
+
+        $messages[] = ['role' => 'user', 'content' => $message];
+        $messages = $this->_trim_messages($messages, 20);
+
+        $tools = $this->_openai_tools();
+
+        // ── First API call ──
+        $response = $this->_call_openai($api_key, $model, $messages, $tools);
+
+        if (!$response || isset($response['_error'])) {
+            http_response_code(502);
+            return $this->_json_response([
+                'status' => 'error',
+                'message' => ['content' => 'Gagal menghubungi AI. Silakan coba lagi nanti.']
+            ]);
+        }
+
+        // ── Handle tool calls loop (max 5 iterations) ──
+        $iterations = 0;
+        while (
+            isset($response['choices'][0]['message']['tool_calls']) &&
+            !empty($response['choices'][0]['message']['tool_calls']) &&
+            $iterations < 5
+        ) {
+            $assistant_msg = $response['choices'][0]['message'];
+            $messages[] = $assistant_msg;
+
+            foreach ($assistant_msg['tool_calls'] as $tool_call) {
+                $fn_name = $tool_call['function']['name'];
+                $fn_args = json_decode($tool_call['function']['arguments'], true) ?? [];
+
+                $fn_result = $this->_execute_tool($fn_name, $fn_args);
+
+                $messages[] = [
+                    'role' => 'tool',
+                    'tool_call_id' => $tool_call['id'],
+                    'content' => json_encode($fn_result, JSON_UNESCAPED_UNICODE)
+                ];
+            }
+
+            $response = $this->_call_openai($api_key, $model, $messages, $tools);
+
+            if (!$response || isset($response['_error'])) {
+                http_response_code(502);
+                return $this->_json_response([
+                    'status' => 'error',
+                    'message' => ['content' => 'Gagal menghubungi AI. Silakan coba lagi nanti.']
+                ]);
+            }
+
+            $iterations++;
+        }
+
+        // ── Extract final reply ──
+        $reply = isset($response['choices'][0]['message']['content'])
+            ? $response['choices'][0]['message']['content']
+            : 'Maaf, saya tidak bisa memproses permintaan Anda saat ini.';
+
+        $messages[] = ['role' => 'assistant', 'content' => $reply];
+        $this->_save_session($sid, $messages);
+
+        // ── Response sesuai format yang dibaca _ask_bot ──
+        $this->_json_response([
+            'status' => 'sukses',
+            'message' => ['content' => $reply],
+            'content' => $reply,
+            'reply' => $reply
         ]);
     }
 
@@ -312,6 +439,11 @@ class Chatbot extends CI_Controller
 
         return "Kamu adalah Copilot, asisten AI untuk sistem monitoring BBWS Serayu Opak (Balai Besar Wilayah Sungai). "
             . "Tugasmu membantu pengguna memahami data dari pos-pos monitoring (logger) seperti AWS, ARR, AWLR, dan sensor lainnya.\n\n"
+            . "WILAYAH KERJA BBWS SERAYU OPAK:\n"
+            . "- Wilayah kerja HANYA mencakup sebagian Provinsi JAWA TENGAH dan Provinsi D.I. YOGYAKARTA.\n"
+            . "- DAS (Daerah Aliran Sungai) yang tercakup: Serayu, Opak, Oyo, Progo, Serang, Bogowonto, Luk Ulo, Ijo, Tipar, Telomoyo, Wawar, dan sekitarnya.\n"
+            . "- SEMUA pos monitoring dalam sistem ini berada di Jawa Tengah atau DIY. TIDAK ADA pos di Jawa Timur, Jawa Barat, atau provinsi lain.\n"
+            . "- Jika pengguna bertanya tentang pos di wilayah di luar Jawa Tengah/DIY, jawab bahwa wilayah tersebut di luar cakupan BBWS Serayu Opak.\n\n"
             . "PENGETAHUAN KATEGORI LOGGER:\n"
             . "- AWS (Automatic Weather Station) / AWR (Automatic Weather Recorder): SAMA, hanya beda istilah. BBWS menyebut AWS, PSDA menyebut AWR. Sensor cuaca LENGKAP (suhu, kelembapan, angin, tekanan udara, radiasi matahari, curah hujan). Pertanyaan 'cuaca', 'suhu', 'kelembapan', 'angin', 'tekanan' → cari pos AWS/AWR.\n"
             . "- ARR (Automatic Rain Recorder): KHUSUS sensor curah hujan. Pertanyaan 'hujan' bisa AWS/AWR atau ARR.\n"
@@ -379,7 +511,12 @@ class Chatbot extends CI_Controller
             . "- Tampilkan grafik setelah tabel ringkasan, bukan sebagai pengganti tabel.\n\n"
             . "- Jika data tidak tersedia atau error, sampaikan dengan sopan.\n"
             . "- Jangan mengarang data, selalu ambil dari function yang tersedia.\n"
-            . "- Tampilkan data numerik dengan format yang mudah dibaca.";
+            . "- Tampilkan data numerik dengan format yang mudah dibaca.\n\n"
+            . "BATASAN TOPIK (WAJIB DIPATUHI):\n"
+            . "- Kamu HANYA boleh menjawab pertanyaan yang berkaitan dengan sistem monitoring BBWS Serayu Opak: data logger, curah hujan, tinggi muka air, debit, cuaca, status koneksi, sensor, pos monitoring, dan topik terkait.\n"
+            . "- Jika pengguna bertanya di LUAR topik monitoring (misalnya: resep masakan, matematika, sejarah, coding, gosip, curhat, pengetahuan umum, politik, olahraga, dll), TOLAK dengan sopan.\n"
+            . "- Contoh penolakan: 'Mohon maaf, saya hanya bisa membantu terkait data monitoring BBWS Serayu Opak seperti curah hujan, tinggi muka air, status logger, dan data sensor lainnya. Silakan tanyakan seputar topik tersebut 😊'\n"
+            . "- JANGAN coba menjawab pertanyaan OOT meskipun kamu tahu jawabannya. Tetap tolak dengan sopan.\n";
     }
 
     // ─── OpenAI Tools Definition ───
@@ -740,7 +877,7 @@ class Chatbot extends CI_Controller
             'model' => $model,
             'messages' => $messages,
             'tools' => $tools,
-            'max_completion_tokens' => 2048,
+            'max_completion_tokens' => 4096,
         ];
 
         $ch = curl_init('https://api.openai.com/v1/chat/completions');
@@ -775,6 +912,14 @@ class Chatbot extends CI_Controller
             $err_msg = $decoded['error']['message'] ?? json_encode($decoded['error']);
             log_message('error', 'OpenAI API error (HTTP ' . $http_code . '): ' . $err_msg);
             return ['_error' => 'OpenAI: ' . $err_msg];
+        }
+
+        // Detect truncated response (finish_reason == 'length')
+        $finish_reason = $decoded['choices'][0]['finish_reason'] ?? null;
+        if ($finish_reason === 'length') {
+            log_message('warning', 'OpenAI response truncated (finish_reason=length)');
+            // Still return the partial response — let chat() handle it
+            // The content may be incomplete but at least won't crash
         }
 
         return $decoded;

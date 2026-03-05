@@ -1125,8 +1125,13 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(reqBody)
             })
-                .then(function (res) { return res.json(); })
-                .then(function (data) {
+                .then(function (res) { return res.text(); })
+                .then(function (text) {
+                    var data;
+                    try { data = JSON.parse(text); } catch (e) {
+                        console.error('Copilot JSON parse error:', e, 'Raw:', text.substring(0, 500));
+                        throw new Error('Response bukan JSON valid');
+                    }
                     clearTimeout(upgradeTimeout);
                     if (progressTimer) clearInterval(progressTimer);
                     if (typingEl.parentNode) typingEl.remove();

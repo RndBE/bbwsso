@@ -11,6 +11,49 @@ class Api extends CI_Controller
 		$this->load->model('m_analisa');
 	}
 
+	function data_new()
+	{
+		$idlogger = $this->input->get('id_logger');
+
+		$awal = $this->input->get('awal') . ' 00:00';
+		$akhir = $this->input->get('akhir') . ' 23:59';
+		$data_logger = $this->db->join('kategori_logger', 'kategori_logger.id_katlogger=t_logger.kategori_log')->join('t_lokasi', 't_lokasi.idlokasi=t_logger.lokasi_logger')->where('t_logger.id_logger', $idlogger)->get('t_logger')->row();
+		$parameter_sensor = $this->db->where('logger_id', $idlogger)->get('parameter_sensor')->result_array();
+
+		$dt = [];
+		if ($data_logger) {
+			$data = $this->db->query('select * from ' . $data_logger->tabel_main . ' where code_logger = "' . $idlogger . '" and waktu >= "' . $awal . '" and waktu <= "' . $akhir . '"')->result_array();
+			if ($data) {
+				foreach ($data as $key2 => $v) {
+					$dt[$key2]['waktu'] = $v['waktu'];
+
+					foreach ($parameter_sensor as $key => $val) {
+						$field_sensor = $val['kolom_sensor'];
+						$nama_parameter = $val['nama_parameter'];
+						$dt[$key2]['data'][] = [
+							'namaParameter' => $nama_parameter,
+							'nilai' => number_format($v[$field_sensor], 2, '.', ''),
+							'satuan' => $val['satuan'],
+						];
+					}
+				}
+			}
+			$vt = [
+				'status' => true,
+				'namaPos' => $data_logger->nama_lokasi,
+				'data' => $dt
+			];
+			echo json_encode($vt);
+		} else {
+			$vt = [
+				'status' => false,
+				'message' => 'ID Logger Tidak Terdaftar'
+			];
+			echo json_encode($vt);
+		}
+
+	}
+
 	function json_sihka()
 	{
 		$data = [
