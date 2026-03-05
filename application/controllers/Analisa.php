@@ -759,7 +759,7 @@ class Analisa extends CI_Controller
 
 			// ── Batch-load: satu kali query untuk data referensi ──
 			$ktg = $this->db->get('kategori_logger')->result_array();
-			$data['ktg_all'] = $ktg; // re-use, tidak perlu query ulang
+			$data['ktg_all'] = $ktg;
 
 			// Batch-load t_perbaikan → map by id_logger
 			$perbaikan_map = [];
@@ -769,9 +769,9 @@ class Analisa extends CI_Controller
 
 			// Batch-load parameter_sensor → map by logger_id (sorted)
 			$all_params = $this->db->order_by("CAST(SUBSTR(kolom_sensor,7) AS UNSIGNED)")->get('parameter_sensor')->result_array();
-			$param_map = [];       // logger_id => [params...]
-			$param_utama_map = []; // logger_id => first row with parameter_utama=1
-			$sensor9_logger_map = []; // logger_id => true (has sensor9 column)
+			$param_map = [];
+			$param_utama_map = [];
+			$sensor9_logger_map = [];
 			foreach ($all_params as $prm) {
 				$param_map[$prm['logger_id']][] = $prm;
 				if ($prm['parameter_utama'] == '1' && !isset($param_utama_map[$prm['logger_id']])) {
@@ -791,7 +791,7 @@ class Analisa extends CI_Controller
 			}
 
 			// Batch-load temp_data per distinct tabel temp_data
-			$temp_data_map = []; // tabel => code_logger => row
+			$temp_data_map = [];
 			$distinct_temp_tables = [];
 			foreach ($ktg as $k) {
 				$distinct_temp_tables[$k['temp_data']] = true;
@@ -803,41 +803,61 @@ class Analisa extends CI_Controller
 				}
 			}
 
-			// Batch-load SUM akumulasi per distinct tabel_main
+			// ── Batch-load SUM akumulasi: UNION ALL untuk semua tabel_main ──
 			$jam_sekarang = date('Y-m-d H') . ':00';
-			$akumulasi_map = []; // tabel_main => code_logger => {sensor8, sensor9}
-			// Collect distinct tabel_main from logger query
+			$akumulasi_map = [];
 			$all_loggers_raw = $this->db->query("SELECT DISTINCT tabel_main FROM t_logger WHERE tabel_main IS NOT NULL AND tabel_main != ''")->result();
+
+			// Build UNION ALL query untuk semua tabel_main sekaligus
+			$union_parts = [];
 			foreach ($all_loggers_raw as $row) {
 				$tbl_main = $row->tabel_main;
 				if (!$tbl_main)
 					continue;
 				$akumulasi_map[$tbl_main] = [];
-				$aku_rows = $this->db->query("SELECT code_logger, SUM(sensor8) as sensor8, SUM(sensor9) as sensor9 FROM `{$tbl_main}` WHERE waktu >= ? GROUP BY code_logger", [$jam_sekarang])->result();
-				foreach ($aku_rows as $ar) {
-					$akumulasi_map[$tbl_main][$ar->code_logger] = $ar;
+				$escaped_time = $this->db->escape($jam_sekarang);
+				$union_parts[] = "SELECT '{$tbl_main}' AS _tbl, code_logger, SUM(sensor8) AS sensor8, SUM(sensor9) AS sensor9 FROM `{$tbl_main}` WHERE waktu >= {$escaped_time} GROUP BY code_logger";
+			}
+			if ($union_parts) {
+				$union_sql = implode(' UNION ALL ', $union_parts);
+				$aku_all = $this->db->query($union_sql)->result();
+				foreach ($aku_all as $ar) {
+					$akumulasi_map[$ar->_tbl][$ar->code_logger] = $ar;
 				}
 			}
 
 			$awal = date('Y-m-d H:i', (mktime(date('H') - 1)));
 
 			// ══════════════════════════════════════════════════════
-			// LOOP 1: Data DAS + Logger sidebar
+			// SINGLE QUERY: Semua logger + lokasi + kategori
+			// ══════════════════════════════════════════════════════
+			$all_loggers = $this->db->query("
+				SELECT t_logger.*, t_lokasi.*, kategori_logger.*
+				FROM t_logger
+				INNER JOIN kategori_logger ON t_logger.kategori_log = kategori_logger.id_katlogger
+				INNER JOIN t_lokasi ON t_lokasi.idlokasi = t_logger.lokasi_logger
+				WHERE t_lokasi.das != ''
+				ORDER BY t_logger.id_logger
+			")->result_array();
+
+			// Build map: das => [loggers]
+			$logger_by_das = [];
+			foreach ($all_loggers as $log) {
+				$logger_by_das[$log['das']][] = $log;
+			}
+
+			// ══════════════════════════════════════════════════════
+			// LOOP 1: Data DAS + Logger sidebar (tanpa query per-DAS)
 			// ══════════════════════════════════════════════════════
 			$das = $this->db->get('list_das')->result_array();
 			foreach ($das as $key => $ds) {
 				$das[$key]['logger'] = [];
-				$data_logger = $this->db->join('kategori_logger', 't_logger.kategori_log = kategori_logger.id_katlogger')
-					->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
-					->where('t_lokasi.das', $ds['nama_das'])
-					->order_by('id_logger')
-					->get('t_logger')->result_array();
+				$data_logger = isset($logger_by_das[$ds['nama_das']]) ? $logger_by_das[$ds['nama_das']] : [];
 
 				foreach ($data_logger as $k => $log) {
 					$tabel = $log['temp_data'];
 					$id_logger = $log['id_logger'];
 
-					// Lookup dari batch map (bukan query)
 					$temp_data = isset($temp_data_map[$tabel][$id_logger]) ? $temp_data_map[$tabel][$id_logger] : null;
 					$cek_perbaikan = isset($perbaikan_map[$id_logger]) ? $perbaikan_map[$id_logger] : null;
 
@@ -858,7 +878,6 @@ class Analisa extends CI_Controller
 						$sdcard = 'Bermasalah';
 					}
 
-					// Lookup parameter_sensor dari batch map
 					$param = isset($param_map[$id_logger]) ? $param_map[$id_logger] : [];
 					foreach ($param as $ky => $val) {
 						$get = 'id_param=' . $val['id_param'] . '_bbws';
@@ -880,258 +899,271 @@ class Analisa extends CI_Controller
 			}
 
 			// ══════════════════════════════════════════════════════
-			// LOOP 2: Data Marker peta
+			// SINGLE QUERY: Marker peta (1 query, bukan per-kategori)
 			// ══════════════════════════════════════════════════════
+			$all_marker_loggers = $this->db->query("
+				SELECT t_logger.*, t_lokasi.*, kategori_logger.*, t_informasi.*
+				FROM t_logger
+				INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi
+				INNER JOIN kategori_logger ON t_logger.kategori_log = kategori_logger.id_katlogger
+				INNER JOIN t_informasi ON t_logger.id_logger = t_informasi.logger_id
+				WHERE t_lokasi.das != ''
+			")->result();
+
+			// Build kategori temp_data map for lookups
+			$ktg_temp_map = [];
+			foreach ($ktg as $k) {
+				$ktg_temp_map[$k['id_katlogger']] = $k['temp_data'];
+			}
+
 			$marker = [];
-			foreach ($ktg as $kat_arr) {
-				$kat = (object) $kat_arr;
-				$tabel = $kat->tabel;
-				$tabel_temp = $kat->temp_data;
+			foreach ($all_marker_loggers as $loklogger) {
+				$tabel_main = $loklogger->tabel_main;
+				$id_logger = $loklogger->id_logger;
+				$icon = $loklogger->tabel;
+				$tabel_temp = isset($ktg_temp_map[$loklogger->kategori_log]) ? $ktg_temp_map[$loklogger->kategori_log] : '';
 
-				$query_lokasilogger = $this->db->query("SELECT * FROM t_logger INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi JOIN kategori_logger ON t_logger.kategori_log = kategori_logger.id_katlogger JOIN t_informasi ON t_logger.id_logger = t_informasi.logger_id WHERE kategori_log = ? AND t_lokasi.das != ''", [$kat->id_katlogger]);
+				$id_param = isset($param_utama_map[$id_logger]) ? $param_utama_map[$id_logger] : null;
+				$dt = isset($temp_data_map[$tabel_temp][$id_logger]) ? $temp_data_map[$tabel_temp][$id_logger] : null;
+				$perb = isset($perbaikan_map[$id_logger]) ? $perbaikan_map[$id_logger] : null;
+				$has_sensor9 = isset($sensor9_logger_map[$id_logger]);
 
-				foreach ($query_lokasilogger->result() as $loklogger) {
-					$tabel_main = $loklogger->tabel_main;
-					$id_logger = $loklogger->id_logger;
-					$icon = $loklogger->tabel;
+				// Default values
+				$waktu = $dt ? $dt->waktu : null;
+				$data_p = 0;
+				$icon_marker = '';
+				$status = '';
+				$statlog = '';
+				$statuspantau = '';
+				$anim = '';
+				$kat_group = '';
+				$controller = '';
+				$status_sd = 'OK';
 
-					// Lookup dari batch map (bukan query)
-					$id_param = isset($param_utama_map[$id_logger]) ? $param_utama_map[$id_logger] : null;
-					$dt = isset($temp_data_map[$tabel_temp][$id_logger]) ? $temp_data_map[$tabel_temp][$id_logger] : null;
-					$perb = isset($perbaikan_map[$id_logger]) ? $perbaikan_map[$id_logger] : null;
-					$has_sensor9 = isset($sensor9_logger_map[$id_logger]);
-
-					// Default values
-					$waktu = $dt ? $dt->waktu : null;
-					$data_p = 0;
-					$icon_marker = '';
-					$status = '';
-					$statlog = '';
-					$statuspantau = '';
-					$anim = '';
-					$kat_group = '';
-					$controller = '';
-					$status_sd = 'OK';
-
-					if ($icon == 'awlr') {
-						$controller = $kat->controller;
-						$kat_group = 'awlr';
-						$data_p = $dt ? $dt->sensor1 : 0;
-						if ($perb) {
-							$icon_marker = base_url() . 'pin_marker/awlr-iri-coklat.png';
-							$status = '<p style="color:brown;margin-bottom:0px">Perbaikan</p>';
-							$statlog = 'Perbaikan';
-							$statuspantau = "Perbaikan";
+				if ($icon == 'awlr') {
+					$controller = $loklogger->controller;
+					$kat_group = 'awlr';
+					$data_p = $dt ? $dt->sensor1 : 0;
+					if ($perb) {
+						$icon_marker = base_url() . 'pin_marker/awlr-iri-coklat.png';
+						$status = '<p style="color:brown;margin-bottom:0px">Perbaikan</p>';
+						$statlog = 'Perbaikan';
+						$statuspantau = "Perbaikan";
+						$anim = "";
+					} else {
+						if ($waktu >= $awal) {
+							$icon_marker = base_url() . 'pin_marker/awlr-iri-hijau.png';
+							$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+							$statlog = 'Koneksi Terhubung';
+							$statuspantau = "Koneksi Terhubung";
 							$anim = "";
 						} else {
-							if ($waktu >= $awal) {
-								$icon_marker = base_url() . 'pin_marker/awlr-iri-hijau.png';
+							$icon_marker = base_url() . 'pin_marker/awlr-iri-hitam.png';
+							$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
+							$statlog = 'Koneksi Terputus';
+							$statuspantau = "Koneksi Terputus";
+							$anim = "google.maps.Animation.BOUNCE";
+						}
+					}
+				} else if ($icon == 'arr') {
+					$controller = 'arr';
+					$kat_group = 'arr';
+
+					$aku = isset($akumulasi_map[$tabel_main][$id_logger]) ? $akumulasi_map[$tabel_main][$id_logger] : null;
+					if ($has_sensor9) {
+						$data_p = $aku ? $aku->sensor9 : 0;
+					} else {
+						$data_p = $aku ? $aku->sensor8 : 0;
+					}
+
+					if ($perb) {
+						$icon_marker = base_url() . 'pin_marker/arr_coklat.png';
+						$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+						$statlog = 'Perbaikan';
+						$statuspantau = "Perbaikan";
+						$anim = "";
+					} else {
+						if ($waktu >= $awal) {
+							if ($data_p <= 0) {
+								$icon_marker = base_url() . 'pin_marker/arr_hijau.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'th';
+								$statuspantau = "Tidak Hujan";
+								$anim = "";
+							} elseif ($data_p >= 0.1 and $data_p < 1) {
+								$icon_marker = base_url() . 'pin_marker/arr_biru.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'sr';
+								$statuspantau = "Hujan Sangat Ringan";
+								$anim = "";
+							} elseif ($data_p >= 1 and $data_p < 5) {
+								$icon_marker = base_url() . 'pin_marker/arr_nila.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'r';
+								$statuspantau = "Hujan Ringan";
+								$anim = "";
+							} elseif ($data_p >= 5 and $data_p < 10) {
+								$icon_marker = base_url() . 'pin_marker/arr_kuning.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 's';
+								$statuspantau = "Hujan Sedang";
+								$anim = "";
+							} elseif ($data_p >= 10 and $data_p < 20) {
+								$icon_marker = base_url() . 'pin_marker/arr_oranye.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'l';
+								$statuspantau = "Hujan Lebat";
+								$anim = "google.maps.Animation.BOUNCE";
+							} elseif ($data_p >= 20) {
+								$icon_marker = base_url() . 'pin_marker/arr_merah.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'sl';
+								$statuspantau = "Hujan Sangat Lebat";
+								$anim = "google.maps.Animation.BOUNCE";
+							}
+							$statlog = 'Koneksi Terhubung';
+						} else {
+							$icon_marker = base_url() . 'pin_marker/arr_hitam.png';
+							$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
+							$statlog = 'Koneksi Terputus';
+							$statuspantau = "Koneksi Terputus";
+							$anim = "google.maps.Animation.BOUNCE";
+						}
+					}
+				} else {
+					$controller = $loklogger->controller;
+					$kat_group = 'awr';
+
+					$aku = isset($akumulasi_map[$tabel_main][$id_logger]) ? $akumulasi_map[$tabel_main][$id_logger] : null;
+					if ($has_sensor9) {
+						$data_p = $aku ? $aku->sensor9 : 0;
+					} else {
+						$data_p = $aku ? $aku->sensor8 : 0;
+					}
+
+					if ($perb) {
+						$icon_marker = base_url() . 'pin_marker/awr_coklat.png';
+						$status = '<p style="color:brown;margin-bottom:0px">Koneksi Terputus</p>';
+						$statlog = 'Perbaikan';
+						$statuspantau = "Perbaikan";
+						$anim = "";
+					} else {
+						if ($waktu >= $awal) {
+							if ($data_p >= 0 and $data_p < 0.1) {
+								$icon_marker = base_url() . 'pin_marker/awr_hijau.png';
 								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
 								$statlog = 'Koneksi Terhubung';
-								$statuspantau = "Koneksi Terhubung";
+								$statuspantau = "Tidak Hujan";
 								$anim = "";
-							} else {
-								$icon_marker = base_url() . 'pin_marker/awlr-iri-hitam.png';
-								$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
-								$statlog = 'Koneksi Terputus';
-								$statuspantau = "Koneksi Terputus";
-								$anim = "google.maps.Animation.BOUNCE";
-							}
-						}
-					} else if ($icon == 'arr') {
-						$controller = 'arr';
-						$kat_group = 'arr';
-
-						// Lookup akumulasi dari batch map
-						$aku = isset($akumulasi_map[$tabel_main][$id_logger]) ? $akumulasi_map[$tabel_main][$id_logger] : null;
-						if ($has_sensor9) {
-							$data_p = $aku ? $aku->sensor9 : 0;
-						} else {
-							$data_p = $aku ? $aku->sensor8 : 0;
-						}
-
-						if ($perb) {
-							$icon_marker = base_url() . 'pin_marker/arr_coklat.png';
-							$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-							$statlog = 'Perbaikan';
-							$statuspantau = "Perbaikan";
-							$anim = "";
-						} else {
-							if ($waktu >= $awal) {
-								if ($data_p <= 0) {
-									$icon_marker = base_url() . 'pin_marker/arr_hijau.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'th';
-									$statuspantau = "Tidak Hujan";
-									$anim = "";
-								} elseif ($data_p >= 0.1 and $data_p < 1) {
-									$icon_marker = base_url() . 'pin_marker/arr_biru.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'sr';
-									$statuspantau = "Hujan Sangat Ringan";
-									$anim = "";
-								} elseif ($data_p >= 1 and $data_p < 5) {
-									$icon_marker = base_url() . 'pin_marker/arr_nila.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'r';
-									$statuspantau = "Hujan Ringan";
-									$anim = "";
-								} elseif ($data_p >= 5 and $data_p < 10) {
-									$icon_marker = base_url() . 'pin_marker/arr_kuning.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 's';
-									$statuspantau = "Hujan Sedang";
-									$anim = "";
-								} elseif ($data_p >= 10 and $data_p < 20) {
-									$icon_marker = base_url() . 'pin_marker/arr_oranye.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'l';
-									$statuspantau = "Hujan Lebat";
-									$anim = "google.maps.Animation.BOUNCE";
-								} elseif ($data_p >= 20) {
-									$icon_marker = base_url() . 'pin_marker/arr_merah.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'sl';
-									$statuspantau = "Hujan Sangat Lebat";
-									$anim = "google.maps.Animation.BOUNCE";
-								}
+							} elseif ($data_p >= 0.1 and $data_p < 1) {
+								$icon_marker = base_url() . 'pin_marker/awr_biru.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
 								$statlog = 'Koneksi Terhubung';
-							} else {
-								$icon_marker = base_url() . 'pin_marker/arr_hitam.png';
-								$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
-								$statlog = 'Koneksi Terputus';
-								$statuspantau = "Koneksi Terputus";
+								$statuspantau = "Hujan Sangat Ringan";
+								$anim = "";
+							} elseif ($data_p >= 1 and $data_p < 5) {
+								$icon_marker = base_url() . 'pin_marker/awr_nila.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'Koneksi Terhubung';
+								$statuspantau = "Hujan Ringan";
+								$anim = "";
+							} elseif ($data_p >= 5 and $data_p < 10) {
+								$icon_marker = base_url() . 'pin_marker/awr_kuning.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'Koneksi Terhubung';
+								$statuspantau = "Hujan Sedang";
+								$anim = "";
+							} elseif ($data_p >= 10 and $data_p < 20) {
+								$icon_marker = base_url() . 'pin_marker/awr_oranye.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'Koneksi Terhubung';
+								$statuspantau = "Hujan Lebat";
+								$anim = "google.maps.Animation.BOUNCE";
+							} elseif ($data_p >= 20) {
+								$icon_marker = base_url() . 'pin_marker/awr_merah.png';
+								$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
+								$statlog = 'Koneksi Terhubung';
+								$statuspantau = "Hujan Sangat Lebat";
 								$anim = "google.maps.Animation.BOUNCE";
 							}
-						}
-					} else {
-						$controller = $kat->controller;
-						$kat_group = 'awr';
-
-						// Lookup akumulasi dari batch map
-						$aku = isset($akumulasi_map[$tabel_main][$id_logger]) ? $akumulasi_map[$tabel_main][$id_logger] : null;
-						if ($has_sensor9) {
-							$data_p = $aku ? $aku->sensor9 : 0;
 						} else {
-							$data_p = $aku ? $aku->sensor8 : 0;
-						}
-
-						if ($perb) {
-							$icon_marker = base_url() . 'pin_marker/awr_coklat.png';
-							$status = '<p style="color:brown;margin-bottom:0px">Koneksi Terputus</p>';
-							$statlog = 'Perbaikan';
-							$statuspantau = "Perbaikan";
-							$anim = "";
-						} else {
-							if ($waktu >= $awal) {
-								if ($data_p >= 0 and $data_p < 0.1) {
-									$icon_marker = base_url() . 'pin_marker/awr_hijau.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'Koneksi Terhubung';
-									$statuspantau = "Tidak Hujan";
-									$anim = "";
-								} elseif ($data_p >= 0.1 and $data_p < 1) {
-									$icon_marker = base_url() . 'pin_marker/awr_biru.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'Koneksi Terhubung';
-									$statuspantau = "Hujan Sangat Ringan";
-									$anim = "";
-								} elseif ($data_p >= 1 and $data_p < 5) {
-									$icon_marker = base_url() . 'pin_marker/awr_nila.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'Koneksi Terhubung';
-									$statuspantau = "Hujan Ringan";
-									$anim = "";
-								} elseif ($data_p >= 5 and $data_p < 10) {
-									$icon_marker = base_url() . 'pin_marker/awr_kuning.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'Koneksi Terhubung';
-									$statuspantau = "Hujan Sedang";
-									$anim = "";
-								} elseif ($data_p >= 10 and $data_p < 20) {
-									$icon_marker = base_url() . 'pin_marker/awr_oranye.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'Koneksi Terhubung';
-									$statuspantau = "Hujan Lebat";
-									$anim = "google.maps.Animation.BOUNCE";
-								} elseif ($data_p >= 20) {
-									$icon_marker = base_url() . 'pin_marker/awr_merah.png';
-									$status = '<p style="color:green;margin-bottom:0px">Koneksi Terhubung</p>';
-									$statlog = 'Koneksi Terhubung';
-									$statuspantau = "Hujan Sangat Lebat";
-									$anim = "google.maps.Animation.BOUNCE";
-								}
-							} else {
-								$icon_marker = base_url() . 'pin_marker/awr_hitam.png';
-								$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
-								$statlog = 'Koneksi Terputus';
-								$statuspantau = "Koneksi Terputus";
-								$anim = "google.maps.Animation.BOUNCE";
-							}
+							$icon_marker = base_url() . 'pin_marker/awr_hitam.png';
+							$status = '<p style="color:red;margin-bottom:0px">Koneksi Terputus</p>';
+							$statlog = 'Koneksi Terputus';
+							$statuspantau = "Koneksi Terputus";
+							$anim = "google.maps.Animation.BOUNCE";
 						}
 					}
-
-					// Lookup foto_pos dari batch map
-					$get = 'id_param=' . ($id_param ? $id_param->id_param : '') . '_bbws';
-					$link = base_url() . 'analisa/set_sensordash?' . $get;
-					$url = isset($foto_map[$id_logger]) ? $foto_map[$id_logger] : null;
-					$img_pos = '';
-					if ($url) {
-						$img_pos = '<div class="d-flex w-100 justify-content-center mb-2 mt-3"><div style="background:url(https://bbws.beacontelemetry.com/image/foto_pos/' . $url->url_foto . ');width:300px;height:200px;background-size:cover;background-position:center" class"img-fluid"></div></div>';
-					}
-					$marker[] = [
-						'nama_das' => $loklogger->das,
-						'id_kategori' => $kat->id_katlogger,
-						'id_logger' => $loklogger->id_logger,
-						'category' => $kat_group,
-						'status_aset' => 'BBWS Serayu Opak',
-						'category_group' => $statuspantau,
-						'koneksi' => $statlog,
-						'status_sd' => $status_sd,
-						'latitude' => $loklogger->latitude,
-						'longitude' => $loklogger->longitude,
-						'nama_lokasi' => $loklogger->nama_lokasi,
-						'icon' => $icon_marker,
-						'id_param' => $id_param ? $id_param->id_param : '',
-						'link' => $link,
-						'nama_pic' => $loklogger->nama_pic,
-						'no_pic' => $loklogger->no_pic,
-						'foto_pos' => $img_pos,
-						'anim' => $anim
-					];
 				}
-			}
 
-			// External API call dengan timeout 5 detik
-			$ctx = stream_context_create(['http' => ['timeout' => 60]]);
-			$das_psda_json = @file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/peta_lokasi', false, $ctx);
-			$das_psda = $das_psda_json ? json_decode($das_psda_json, true) : null;
-			if (!$das_psda || !isset($das_psda['data_konten']) || !isset($das_psda['marker'])) {
-				$das_psda = ['data_konten' => [], 'marker' => []];
-			}
-			$data_das = $das_psda['data_konten'];
-			$data_marker = $das_psda['marker'];
-
-			foreach ($das as $ds => $vd) {
-				if ($vd['nama_das'] == 'Progo' && isset($data_das['PROGO'])) {
-					$merger = array_merge($data_das['PROGO']['logger'], $das[$ds]['logger']);
-					$das[$ds]['logger'] = $merger;
-				} elseif ($vd['nama_das'] == 'Opak' && isset($data_das['OPAK-OYO'])) {
-					$merger = array_merge($data_das['OPAK-OYO']['logger'], $das[$ds]['logger']);
-					$das[$ds]['logger'] = $merger;
-				} elseif ($vd['nama_das'] == 'Serang' && isset($data_das['SERANG'])) {
-					$merger = array_merge($data_das['SERANG']['logger'], $das[$ds]['logger']);
-					$das[$ds]['logger'] = $merger;
+				$get = 'id_param=' . ($id_param ? $id_param->id_param : '') . '_bbws';
+				$link = base_url() . 'analisa/set_sensordash?' . $get;
+				$url = isset($foto_map[$id_logger]) ? $foto_map[$id_logger] : null;
+				$img_pos = '';
+				if ($url) {
+					$img_pos = '<div class="d-flex w-100 justify-content-center mb-2 mt-3"><div style="background:url(https://bbws.beacontelemetry.com/image/foto_pos/' . $url->url_foto . ');width:300px;height:200px;background-size:cover;background-position:center" class"img-fluid"></div></div>';
 				}
+				$marker[] = [
+					'nama_das' => $loklogger->das,
+					'id_kategori' => $loklogger->id_katlogger,
+					'id_logger' => $loklogger->id_logger,
+					'category' => $kat_group,
+					'status_aset' => 'BBWS Serayu Opak',
+					'category_group' => $statuspantau,
+					'koneksi' => $statlog,
+					'status_sd' => $status_sd,
+					'latitude' => $loklogger->latitude,
+					'longitude' => $loklogger->longitude,
+					'nama_lokasi' => $loklogger->nama_lokasi,
+					'icon' => $icon_marker,
+					'id_param' => $id_param ? $id_param->id_param : '',
+					'link' => $link,
+					'nama_pic' => $loklogger->nama_pic,
+					'no_pic' => $loklogger->no_pic,
+					'foto_pos' => $img_pos,
+					'anim' => $anim
+				];
 			}
+
+			// Data BBWS lokal langsung di-render, PSDA di-fetch async via AJAX
 			$data['data_konten'] = $das;
 			$data['das'] = $das;
-			$data['marker'] = array_merge($data_marker, $marker);
+			$data['marker'] = $marker;
 			$this->load->view('konten/back/analisa_geojson', $data);
 		} else {
 			redirect('login');
 		}
 
+	}
+
+	/**
+	 * AJAX endpoint: fetch PSDA markers & DAS data asynchronously
+	 * Dipanggil dari JS setelah map BBWS sudah ter-render
+	 */
+	public function fetch_psda_markers()
+	{
+		if (!$this->session->userdata('logged_in')) {
+			header('Content-Type: application/json');
+			echo json_encode(['status' => 'error', 'message' => 'Unauthorized']);
+			return;
+		}
+
+		$ctx = stream_context_create(['http' => ['timeout' => 60]]);
+		$das_psda_json = @file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/peta_lokasi', false, $ctx);
+		$das_psda = $das_psda_json ? json_decode($das_psda_json, true) : null;
+
+		if (!$das_psda || !isset($das_psda['data_konten']) || !isset($das_psda['marker'])) {
+			header('Content-Type: application/json');
+			echo json_encode(['status' => 'ok', 'data_konten' => [], 'marker' => []]);
+			return;
+		}
+
+		header('Content-Type: application/json');
+		echo json_encode([
+			'status' => 'ok',
+			'data_konten' => $das_psda['data_konten'],
+			'marker' => $das_psda['marker']
+		]);
 	}
 
 	function combologger()
