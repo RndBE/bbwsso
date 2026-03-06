@@ -1639,7 +1639,7 @@
 			renderFilters(); updateVisibility(); wireFilterEvents();
 
 			// ====== Async fetch PSDA markers ======
-			LoadingMgr.set('Mengambil data PSDA...', 65);
+			LoadingMgr.set('Mengambil data ...', 65);
 			$.ajax({
 				url: '<?= base_url() ?>analisa/fetch_psda_markers',
 				type: 'GET',
