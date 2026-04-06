@@ -26,8 +26,12 @@ class Chatbot extends CI_Controller
     // ─── Helper: JSON response ───
     private function _json_response($data)
     {
+        // Bersihkan output buffer agar tidak ada PHP warning/notice yang bocor
+        if (ob_get_length() > 0) {
+            ob_clean();
+        }
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode($data);
+        echo json_encode($data, JSON_UNESCAPED_UNICODE);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -86,6 +90,7 @@ class Chatbot extends CI_Controller
 
         if (!$response || isset($response['_error'])) {
             $err_detail = isset($response['_error']) ? $response['_error'] : 'Gagal menghubungi OpenAI API';
+            http_response_code(500);
             return $this->_json_response(['status' => 'error', 'message' => $err_detail]);
         }
 
@@ -126,6 +131,7 @@ class Chatbot extends CI_Controller
 
             if (!$response || isset($response['_error'])) {
                 $err_detail = isset($response['_error']) ? $response['_error'] : 'Gagal menghubungi OpenAI API';
+                http_response_code(500);
                 return $this->_json_response(['status' => 'error', 'message' => $err_detail]);
             }
 

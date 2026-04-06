@@ -1120,17 +1120,37 @@
             }
 
             // Call API
+            var httpStatus = null;
             fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(reqBody)
             })
-                .then(function (res) { return res.text(); })
-                .then(function (text) {
+                .then(function (res) {
+                    httpStatus = res.status;
+                    return res.text();
+                })
+                .then(function (rawText) {
                     var data;
-                    try { data = JSON.parse(text); } catch (e) {
-                        console.error('Copilot JSON parse error:', e, 'Raw:', text.substring(0, 500));
-                        throw new Error('Response bukan JSON valid');
+                    try {
+                        data = JSON.parse(rawText);
+                    } catch (e) {
+                        // ── LOG LENGKAP KE CONSOLE ──
+                        console.group('%c❌ Copilot Error: Response bukan JSON valid', 'color:red;font-weight:bold');
+                        console.error('HTTP Status:', httpStatus);
+                        console.error('Parse Error:', e.message);
+                        console.error('Raw Response (full):');
+                        console.error(rawText);
+                        console.groupEnd();
+                        clearTimeout(upgradeTimeout);
+                        if (progressTimer) clearInterval(progressTimer);
+                        if (typingEl.parentNode) typingEl.remove();
+                        if (progressEl && progressEl.parentNode) progressEl.remove();
+                        addMsg('⚠️ Server error (HTTP ' + httpStatus + '): Response tidak valid. Lihat Console (F12) untuk detail error lengkap.', 'bot', false, true);
+                        isSending = false;
+                        sendBtn.disabled = false;
+                        input.focus();
+                        return;
                     }
                     clearTimeout(upgradeTimeout);
                     if (progressTimer) clearInterval(progressTimer);
@@ -1156,8 +1176,14 @@
                         var html = renderMarkdown(data.reply);
                         addMsg(html, 'bot', true);
                     } else {
+                        // ── LOG ERROR DARI SERVER KE CONSOLE ──
+                        console.group('%c⚠️ Copilot Server Error', 'color:orange;font-weight:bold');
+                        console.error('HTTP Status:', httpStatus);
+                        console.error('Server message:', data.message);
+                        console.error('Full response:', data);
+                        console.groupEnd();
                         var errMsg = data.message || 'Terjadi kesalahan. Silakan coba lagi.';
-                        addMsg(errMsg, 'bot', false, true);
+                        addMsg('⚠️ ' + errMsg, 'bot', false, true);
                     }
                 })
                 .catch(function (err) {
@@ -1165,8 +1191,11 @@
                     if (progressTimer) clearInterval(progressTimer);
                     if (typingEl.parentNode) typingEl.remove();
                     if (progressEl && progressEl.parentNode) progressEl.remove();
-                    console.error('Copilot error:', err);
-                    addMsg('Gagal menghubungi server. Periksa koneksi Anda.', 'bot', false, true);
+                    console.group('%c❌ Copilot Network Error', 'color:red;font-weight:bold');
+                    console.error('HTTP Status:', httpStatus);
+                    console.error('Error:', err);
+                    console.groupEnd();
+                    addMsg('❌ Gagal menghubungi server (HTTP ' + (httpStatus || 'N/A') + '). Periksa koneksi Anda.', 'bot', false, true);
                 })
                 .finally(function () {
                     isSending = false;
