@@ -16,6 +16,9 @@ user_guide_src/cilexer/dist/*
 user_guide_src/cilexer/pycilexer.egg-info/*
 /vendor/
 
+# Config sensitif — isi manual di server, jangan di-commit
+application/config/openai.php
+
 # IDE Files
 #-------------------------
 /nbproject/
