@@ -1255,85 +1255,112 @@ class Chatbot extends CI_Controller
     }
 
     // ═══════════════════════════════════════════
-    // SEARCH LOGGER — fuzzy name search (using loilo/fuse)
+    // SEARCH LOGGER — fuzzy name search (native PHP, no dependency)
     // ═══════════════════════════════════════════
     public function search_logger()
     {
-        $input = $this->_json_input();
-        $keyword = isset($input['keyword']) ? trim($input['keyword']) : '';
+        $input    = $this->_json_input();
+        $keyword  = isset($input['keyword'])  ? trim($input['keyword'])           : '';
         $kategori = isset($input['kategori']) ? strtolower(trim($input['kategori'])) : '';
 
         if ($keyword === '') {
             return $this->_json_response(['status' => 'error', 'message' => 'keyword wajib diisi']);
         }
 
-        // If kategori provided, append to keyword as soft signal for Fuse
-        // e.g. keyword "kaliurang" + kategori "aws" → search "aws kaliurang"
-        // This avoids hard filtering that breaks AWR/AWS cross-terminology
-        $search_term = $keyword;
-        if ($kategori !== '') {
-            $search_term = $kategori . ' ' . $keyword;
-        }
+        // Normalise search term: gabungkan kategori + keyword jika ada
+        $search_term = ($kategori !== '') ? $kategori . ' ' . $keyword : $keyword;
+        $search_term = strtolower($search_term);
 
-        // Build flat list from logger_mapping.json (no pre-filtering)
-        $list = [];
+        // Strip spasi/tanda baca untuk matching: "wadas lintang" → "wadaslintang"
+        $search_stripped = preg_replace('/[\s_\-\.]+/', '', $search_term);
+
+        // Pecah jadi kata-kata (min 2 karakter)
+        $words = array_filter(explode(' ', $search_term), function ($w) {
+            return strlen($w) >= 2;
+        });
+
+        // Build flat list
         $mapping = $this->_load_logger_mapping();
+        $scored  = [];
 
         foreach ($mapping as $cat) {
             $cat_name = $cat['nama_kategori'];
+            $is_bbws  = true;
 
             foreach ($cat['logger'] as $l) {
-                $nama = $l['nama_logger'] ?? $l['nama_lokasi'] ?? '';
-                $lokasi = $l['nama_lokasi'] ?? '';
+                $nama    = $l['nama_lokasi'] ?? $l['nama_logger'] ?? '';
                 $is_psda = !empty($l['status_aset']);
 
-                $list[] = [
-                    'id_logger' => $l['id_logger'] ?? '',
-                    'nama_logger' => $nama,
-                    'lokasi' => $lokasi,
-                    'kategori' => $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)'),
-                    'latitude' => $l['latitude'] ?? '',
-                    'longitude' => $l['longitude'] ?? '',
-                    // Space-stripped variant so "watubarut" matches "Watu Barut"
-                    'lokasi_stripped' => strtolower(preg_replace('/[\s_\-\.]+/', '', $lokasi)),
-                ];
+                $lokasi_lower    = strtolower($nama);
+                $lokasi_stripped = preg_replace('/[\s_\-\.]+/', '', $lokasi_lower);
+                $kat_lower       = strtolower($cat_name);
+
+                // ── Scoring ──
+                $score = 0;
+
+                // 1) Exact substring match di lokasi (bobot tinggi)
+                if (strpos($lokasi_lower, $search_term) !== false) {
+                    $score += 100;
+                }
+                // 2) Exact substring di lokasi_stripped (untuk "wadaslintang" → "wadas lintang")
+                if (strpos($lokasi_stripped, $search_stripped) !== false) {
+                    $score += 90;
+                }
+                // 3) Per-kata match
+                foreach ($words as $word) {
+                    if (strpos($lokasi_lower, $word) !== false) {
+                        $score += 30;
+                    }
+                    if (strpos($kat_lower, $word) !== false) {
+                        $score += 10;
+                    }
+                    // Stripped match (kata tanpa spasi)
+                    $word_stripped = preg_replace('/[\s_\-\.]+/', '', $word);
+                    if ($word_stripped !== $word && strpos($lokasi_stripped, $word_stripped) !== false) {
+                        $score += 20;
+                    }
+                }
+                // 4) Similar_text fallback (fuzzy)
+                similar_text($search_term, $lokasi_lower, $pct);
+                if ($pct >= 40) {
+                    $score += (int)($pct * 0.5);
+                }
+
+                if ($score > 0) {
+                    $scored[] = [
+                        'score'      => $score,
+                        'id_logger'  => $l['id_logger'] ?? '',
+                        'nama_logger'=> $nama,
+                        'lokasi'     => $nama,
+                        'kategori'   => $cat_name . ($is_psda ? ' (PSDA)' : ' (BBWS)'),
+                        'latitude'   => $l['latitude'] ?? '',
+                        'longitude'  => $l['longitude'] ?? '',
+                        'relevance'  => 0,
+                    ];
+                }
             }
         }
 
-        // Fuse fuzzy search
-        $fuse = new \Fuse\Fuse($list, [
-            'keys' => ['lokasi', 'kategori', 'lokasi_stripped'],
-            'threshold' => 0.4,
-            'ignoreLocation' => true,
-            'includeScore' => true,
-            'minMatchCharLength' => 2,
-            'shouldSort' => true,
-        ]);
+        // Sort by score descending
+        usort($scored, function ($a, $b) { return $b['score'] - $a['score']; });
 
-        $results = $fuse->search($search_term);
-
-        // Format results (limit 15)
+        // Format results (limit 15), normalise relevance to 0-100
+        $max_score = !empty($scored) ? $scored[0]['score'] : 1;
         $data = [];
-        foreach (array_slice($results, 0, 15) as $r) {
-            $item = $r['item'];
-            $data[] = [
-                'id_logger' => $item['id_logger'],
-                'nama_logger' => $item['nama_logger'],
-                'lokasi' => $item['lokasi'],
-                'kategori' => $item['kategori'],
-                'latitude' => $item['latitude'],
-                'longitude' => $item['longitude'],
-                'relevance' => round((1 - $r['score']) * 100, 1)
-            ];
+        foreach (array_slice($scored, 0, 15) as $r) {
+            $r['relevance'] = round(($r['score'] / $max_score) * 100, 1);
+            unset($r['score']);
+            $data[] = $r;
         }
 
         $this->_json_response([
-            'status' => 'sukses',
+            'status'  => 'sukses',
             'keyword' => $keyword,
-            'total' => count($data),
-            'data' => $data
+            'total'   => count($data),
+            'data'    => $data
         ]);
     }
+
 
     // ─── Helper: cek koneksi (1 jam terakhir) ───
     private function _cek_koneksi($waktu)
