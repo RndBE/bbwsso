@@ -47,6 +47,28 @@ class Chatbot extends CI_Controller
      */
     public function chat()
     {
+        // ── Pastikan tidak timeout saat proses query berat (tool calls + API) ──
+        @set_time_limit(300);
+
+        // ── Tangkap fatal error PHP agar response tidak pernah kosong ──
+        register_shutdown_function(function () {
+            $err = error_get_last();
+            if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+                // Pastikan buffer bersih
+                while (ob_get_level() > 0) {
+                    ob_end_clean();
+                }
+                http_response_code(500);
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode([
+                    'status'  => 'error',
+                    'message' => 'PHP Fatal Error: ' . $err['message'],
+                    '_debug_file' => basename($err['file']),
+                    '_debug_line' => $err['line'],
+                ], JSON_UNESCAPED_UNICODE);
+            }
+        });
+
         $input = $this->_json_input();
         $message = isset($input['message']) ? trim($input['message']) : '';
         $sid = isset($input['session_id']) ? $input['session_id'] : null;
