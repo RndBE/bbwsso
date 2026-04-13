@@ -23,13 +23,13 @@ date_default_timezone_set("Asia/Jakarta");
 | a PHP script and you can easily do that on your own.
 |
 */
-// if (isset($_SERVER['HTTP_HOST'])) {
-// 	$root = (isset($_SERVER['HTTPS']) ? "https://" : "http://") . $_SERVER['HTTP_HOST'];
-// 	$root .= str_replace(basename($_SERVER['SCRIPT_NAME']), '', $_SERVER['SCRIPT_NAME']);
-// 	$config['base_url'] = $root;
-// } else {
-// 	$config['base_url'] = 'https://bbwsso.monitoring4system.com/';
-// }
+if (isset($_SERVER['HTTP_HOST'])) {
+	$root = (isset($_SERVER['HTTPS']) ? "https://" : "http://") . $_SERVER['HTTP_HOST'];
+	$root .= str_replace(basename($_SERVER['SCRIPT_NAME']), '', $_SERVER['SCRIPT_NAME']);
+	$config['base_url'] = $root;
+} else {
+	$config['base_url'] = 'https://bbwsso.monitoring4system.com/';
+}
 
 $config['base_url'] = 'http://bbwsso.host/';
 
@@ -144,8 +144,7 @@ $config['subclass_prefix'] = 'MY_';
 | Note: This will NOT disable or override the CodeIgniter-specific
 |	autoloading (application/config/autoload.php)
 */
-$config['composer_autoload'] = FALSE;
-
+$config['composer_autoload'] = FCPATH . 'vendor/autoload.php';
 /*
 |--------------------------------------------------------------------------
 | Allowed URL Characters

@@ -1,4 +1,4 @@
-<!-- Copilot Chatbot Button & Modal -->
+<!-- SobatSO Chatbot Button & Modal -->
 <style>
     /* ── Floating Action Button ── */
     #copilot-fab {
@@ -840,7 +840,7 @@
         <path
             d="M19.5 13a2.5 2.5 0 0 0 2.5 2.5a2.5 2.5 0 0 0 -2.5 2.5a2.5 2.5 0 0 0 -2.5 -2.5a2.5 2.5 0 0 0 2.5 -2.5" />
     </svg>
-    <span class="fab-label">Copilot</span>
+    <span class="fab-label">SobatSO</span>
 </button>
 
 <!-- Modal Overlay -->
@@ -854,7 +854,7 @@
                     <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
                     <path d="M17 4a2 2 0 0 0 2 2a2 2 0 0 0 -2 2a2 2 0 0 0 -2 -2a2 2 0 0 0 2 -2" />
                 </svg>
-                Copilot
+                SobatSO
                 <span class="dot"></span>
             </h3>
             <button id="copilot-close" onclick="copilotClose()">
@@ -878,7 +878,7 @@
                             d="M19.5 13a2.5 2.5 0 0 0 2.5 2.5a2.5 2.5 0 0 0 -2.5 2.5a2.5 2.5 0 0 0 -2.5 -2.5a2.5 2.5 0 0 0 2.5 -2.5" />
                     </svg>
                 </div>
-                <h4>Halo! Saya Copilot 👋</h4>
+                <h4>Halo! Saya SobatSO 👋</h4>
                 <p>Asisten AI Anda untuk membantu memahami data monitoring. Tanyakan apa saja tentang data logger, curah
                     hujan, tinggi muka air, dan lainnya.</p>
                 <div class="copilot-suggestions">
