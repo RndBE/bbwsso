@@ -146,24 +146,31 @@ if ($mode === 'hari' && $typegraf === 'column') {
 	$zones = [['value' => 0.1, 'color' => '#78c145'], ['value' => 1, 'color' => '#70cddd'], ['value' => 5, 'color' => '#35549d'], ['value' => 10, 'color' => '#fef216'], ['value' => 20, 'color' => '#f47e2c'], ['color' => '#ed1c24']];
 	$img = 'kotak-hijau.png';
 	$txtCls = 'text-white';
+	$txtAkum = 'Tidak Hujan';
 	if ($akumRaw <= 0) {
 		$img = 'kotak-hijau.png';
 		$txtCls = 'text-white';
+		$txtAkum = 'Tidak Hujan';
 	} elseif ($akumRaw < 5 && $akumRaw >= 0.1) {
 		$img = 'kotak-cyan.png';
 		$txtCls = 'text-white';
+		$txtAkum = 'Hujan Sangat Ringan';
 	} elseif ($akumRaw < 20) {
 		$img = 'kotak-nila.png';
 		$txtCls = 'text-white';
+		$txtAkum = 'Hujan Ringan';
 	} elseif ($akumRaw < 50) {
 		$img = 'kotak-kuning.png';
 		$txtCls = '';
+		$txtAkum = 'Hujan Sedang';
 	} elseif ($akumRaw < 100) {
 		$img = 'kotak-oranye.png';
 		$txtCls = 'text-white';
+		$txtAkum = 'Hujan Lebat';
 	} else {
 		$img = 'kotak-merah.png';
 		$txtCls = 'text-white';
+		$txtAkum = 'Hujan Sangat Lebat';
 	}
 } elseif ($mode === 'range') {
 	$days = ($tglDari && $tglSampai) ? max(1, (strtotime($tglSampai) - strtotime($tglDari)) / 86400) : 1;
@@ -565,9 +572,12 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 										</div>
 										<div class="col">
 											<div class="font-weight-medium">
-												<div class="subheader">Akumulasi CH Harian tanggal <?= $tglPada ?></div>
+												<div class="subheader">Akumulasi CH Harian <?= $tglPada ?></div>
 											</div>
 											<div class="h1 mb-0 me-2 mt-0"><?= $akumStr ?> mm</div>
+											<div class="h5 fw-normal mb-0 me-2 mt-0">
+												<?= $txtAkum ?>
+											</div>
 										</div>
 									</div>
 								</div>
@@ -576,12 +586,12 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 						<div class="col-sm-9 col-lg-9 mb-3">
 							<div class="card card-sm h-100">
 								<div class="card-body d-flex align-items-center">
-									<div class="row w-100">
+									<div class="row w-100 gy-2">
 										<div class="col-auto d-flex align-items-center justify-content-xl-between">
 											<h4 class="mb-0 mt-0">Keterangan Intensitas per Jam</h4>
 											<h4 class="mb-0 mt-0">:</h4>
 										</div>
-										<div class="col-xl-auto mt-2 mt-xxl-0">
+										<div class="col-xl-auto mt-2 ">
 											<div class="row gx-2 align-items-center">
 												<?php foreach ($legend as $it) { ?>
 													<div class="col-6 col-sm-auto">
@@ -998,7 +1008,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 	Highcharts.chart('analisa', {
 		chart: {
 			<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
-									events: {
+																									events: {
 					load: function () {
 						let c = this;
 
@@ -1026,7 +1036,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 		xAxis: [
 			{
 				<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
-										gridLineWidth: 0,          // Hapus grid vertikal
+																										gridLineWidth: 0,          // Hapus grid vertikal
 					minorGridLineWidth: 0,     // Hapus grid minor
 					tickLength: 0,             // Opsional: hapus tick kecil
 				<?php } ?>
@@ -1047,7 +1057,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 		yAxis: [
 			{
 				<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
-										min: 0,
+																										min: 0,
 					max: 8,
 					gridLineWidth: 0,          // Hapus grid vertikal
 					minorGridLineWidth: 0,     // Hapus grid minor
