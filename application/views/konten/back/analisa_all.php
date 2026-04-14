@@ -6,7 +6,10 @@
 <script src="<?php echo base_url(); ?>code/js/themes/grid.js"></script>
 <style>
 	/* Custom Picker */
-	.custom-picker-wrap { position: relative; }
+	.custom-picker-wrap {
+		position: relative;
+	}
+
 	.custom-picker-dropdown {
 		display: none;
 		position: absolute;
@@ -17,11 +20,15 @@
 		background: #fff;
 		border: 1px solid #e0e0e0;
 		border-radius: 8px;
-		box-shadow: 0 4px 16px rgba(0,0,0,.12);
+		box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
 		margin-top: 4px;
 		padding: 8px;
 	}
-	.custom-picker-dropdown.show { display: block; }
+
+	.custom-picker-dropdown.show {
+		display: block;
+	}
+
 	.custom-picker-header {
 		display: flex;
 		align-items: center;
@@ -29,6 +36,7 @@
 		padding: 4px 0;
 		margin-bottom: 8px;
 	}
+
 	.custom-picker-header .cp-nav {
 		background: none;
 		border: none;
@@ -39,17 +47,23 @@
 		border-radius: 4px;
 		line-height: 1;
 	}
-	.custom-picker-header .cp-nav:hover { background: #f0f0f0; }
+
+	.custom-picker-header .cp-nav:hover {
+		background: #f0f0f0;
+	}
+
 	.custom-picker-header .cp-label {
 		font-weight: 600;
 		font-size: 14px;
 		user-select: none;
 	}
+
 	.custom-picker-grid {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
 		gap: 6px;
 	}
+
 	.custom-picker-grid .cp-item {
 		padding: 8px 4px;
 		text-align: center;
@@ -61,7 +75,11 @@
 		background: none;
 		width: 100%;
 	}
-	.custom-picker-grid .cp-item:hover { background: #e9ecef; }
+
+	.custom-picker-grid .cp-item:hover {
+		background: #e9ecef;
+	}
+
 	.custom-picker-grid .cp-item.active {
 		background: #6c757d;
 		color: #fff;
@@ -349,33 +367,69 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 														</svg></span>
 												</div>
 											<?php } elseif ($mode === 'bulan') { ?>
-												<input type="hidden" name="pada" id="monthPickerValue" value="<?= $tglPada ?>" required />
+												<input type="hidden" name="pada" id="monthPickerValue"
+													value="<?= $tglPada ?>" required />
 												<div class="custom-picker-wrap">
 													<div class="input-icon">
-														<input class="form-control" id="monthPickerInput" placeholder="Pilih Bulan" value="<?= $tglPada ?>" autocomplete="off" readonly style="cursor:pointer;background:#fff" />
-														<span class="input-icon-addon"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><rect x="4" y="5" width="16" height="16" rx="2" /><line x1="16" y1="3" x2="16" y2="7" /><line x1="8" y1="3" x2="8" y2="7" /><line x1="4" y1="11" x2="20" y2="11" /><line x1="11" y1="15" x2="12" y2="15" /><line x1="12" y1="15" x2="12" y2="18" /></svg></span>
+														<input class="form-control" id="monthPickerInput"
+															placeholder="Pilih Bulan" value="<?= $tglPada ?>"
+															autocomplete="off" readonly
+															style="cursor:pointer;background:#fff" />
+														<span class="input-icon-addon"><svg
+																xmlns="http://www.w3.org/2000/svg" class="icon" width="24"
+																height="24" viewBox="0 0 24 24" stroke-width="2"
+																stroke="currentColor" fill="none" stroke-linecap="round"
+																stroke-linejoin="round">
+																<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+																<rect x="4" y="5" width="16" height="16" rx="2" />
+																<line x1="16" y1="3" x2="16" y2="7" />
+																<line x1="8" y1="3" x2="8" y2="7" />
+																<line x1="4" y1="11" x2="20" y2="11" />
+																<line x1="11" y1="15" x2="12" y2="15" />
+																<line x1="12" y1="15" x2="12" y2="18" />
+															</svg></span>
 													</div>
 													<div class="custom-picker-dropdown" id="monthPickerDropdown">
 														<div class="custom-picker-header">
-															<button type="button" class="cp-nav" id="mpPrev">&#8249;</button>
+															<button type="button" class="cp-nav"
+																id="mpPrev">&#8249;</button>
 															<span class="cp-label" id="mpYearLabel"></span>
-															<button type="button" class="cp-nav" id="mpNext">&#8250;</button>
+															<button type="button" class="cp-nav"
+																id="mpNext">&#8250;</button>
 														</div>
 														<div class="custom-picker-grid" id="mpGrid"></div>
 													</div>
 												</div>
 											<?php } elseif ($mode === 'tahun') { ?>
-												<input type="hidden" name="pada" id="yearPickerValue" value="<?= $tglPada ?>" required />
+												<input type="hidden" name="pada" id="yearPickerValue"
+													value="<?= $tglPada ?>" required />
 												<div class="custom-picker-wrap">
 													<div class="input-icon">
-														<input class="form-control" id="yearPickerInput" placeholder="Pilih Tahun" value="<?= $tglPada ?>" autocomplete="off" readonly style="cursor:pointer;background:#fff" />
-														<span class="input-icon-addon"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><rect x="4" y="5" width="16" height="16" rx="2" /><line x1="16" y1="3" x2="16" y2="7" /><line x1="8" y1="3" x2="8" y2="7" /><line x1="4" y1="11" x2="20" y2="11" /><line x1="11" y1="15" x2="12" y2="15" /><line x1="12" y1="15" x2="12" y2="18" /></svg></span>
+														<input class="form-control" id="yearPickerInput"
+															placeholder="Pilih Tahun" value="<?= $tglPada ?>"
+															autocomplete="off" readonly
+															style="cursor:pointer;background:#fff" />
+														<span class="input-icon-addon"><svg
+																xmlns="http://www.w3.org/2000/svg" class="icon" width="24"
+																height="24" viewBox="0 0 24 24" stroke-width="2"
+																stroke="currentColor" fill="none" stroke-linecap="round"
+																stroke-linejoin="round">
+																<path stroke="none" d="M0 0h24v24H0z" fill="none" />
+																<rect x="4" y="5" width="16" height="16" rx="2" />
+																<line x1="16" y1="3" x2="16" y2="7" />
+																<line x1="8" y1="3" x2="8" y2="7" />
+																<line x1="4" y1="11" x2="20" y2="11" />
+																<line x1="11" y1="15" x2="12" y2="15" />
+																<line x1="12" y1="15" x2="12" y2="18" />
+															</svg></span>
 													</div>
 													<div class="custom-picker-dropdown" id="yearPickerDropdown">
 														<div class="custom-picker-header">
-															<button type="button" class="cp-nav" id="ypPrev">&#8249;</button>
+															<button type="button" class="cp-nav"
+																id="ypPrev">&#8249;</button>
 															<span class="cp-label" id="ypRangeLabel"></span>
-															<button type="button" class="cp-nav" id="ypNext">&#8250;</button>
+															<button type="button" class="cp-nav"
+																id="ypNext">&#8250;</button>
 														</div>
 														<div class="custom-picker-grid" id="ypGrid"></div>
 													</div>
@@ -511,7 +565,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 										</div>
 										<div class="col">
 											<div class="font-weight-medium">
-												<div class="subheader">Akumulasi Curah Hujan tanggal <?= $tglPada ?></div>
+												<div class="subheader">Akumulasi CH Harian tanggal <?= $tglPada ?></div>
 											</div>
 											<div class="h1 mb-0 me-2 mt-0"><?= $akumStr ?> mm</div>
 										</div>
@@ -524,7 +578,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 								<div class="card-body d-flex align-items-center">
 									<div class="row w-100">
 										<div class="col-auto d-flex align-items-center justify-content-xl-between">
-											<h4 class="mb-0 mt-0">Keterangan</h4>
+											<h4 class="mb-0 mt-0">Keterangan Intensitas per Jam</h4>
 											<h4 class="mb-0 mt-0">:</h4>
 										</div>
 										<div class="col-xl-auto mt-2 mt-xxl-0">
@@ -559,7 +613,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 								<div class="card-body d-flex align-items-center">
 									<div class="row w-100">
 										<div class="col-auto d-flex align-items-center justify-content-xl-between">
-											<h4 class="mb-0 mt-0">Keterangan</h4>
+											<h4 class="mb-0 mt-0">Keterangan Intensitas per Hari</h4>
 											<h4 class="mb-0 mt-0">:</h4>
 										</div>
 										<div class="col-xl-auto">
@@ -838,33 +892,33 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 <script src="https://unpkg.com/xlsx@0.15.1/dist/xlsx.full.min.js"></script>
 <script>
 	// === Custom Month Picker ===
-	(function(){
+	(function () {
 		var input = document.getElementById('monthPickerInput');
 		var dropdown = document.getElementById('monthPickerDropdown');
-		if(!input || !dropdown) return;
+		if (!input || !dropdown) return;
 		var grid = document.getElementById('mpGrid');
 		var label = document.getElementById('mpYearLabel');
 		var hidden = document.getElementById('monthPickerValue');
-		var months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Ags','Sep','Okt','Nov','Des'];
+		var months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
 		var cur = hidden.value;
 		var selYear = cur ? parseInt(cur.split('-')[0]) : new Date().getFullYear();
-		var selMonth = cur ? parseInt(cur.split('-')[1]) : (new Date().getMonth()+1);
+		var selMonth = cur ? parseInt(cur.split('-')[1]) : (new Date().getMonth() + 1);
 		var dispYear = selYear;
 
-		function render(){
+		function render() {
 			label.textContent = dispYear;
 			grid.innerHTML = '';
-			for(var i=0;i<12;i++){
+			for (var i = 0; i < 12; i++) {
 				var btn = document.createElement('button');
 				btn.type = 'button';
 				btn.className = 'cp-item';
 				btn.textContent = months[i];
-				if(dispYear === selYear && (i+1) === selMonth) btn.classList.add('active');
-				btn.dataset.month = i+1;
-				btn.addEventListener('click', function(){
+				if (dispYear === selYear && (i + 1) === selMonth) btn.classList.add('active');
+				btn.dataset.month = i + 1;
+				btn.addEventListener('click', function () {
 					selYear = dispYear;
 					selMonth = parseInt(this.dataset.month);
-					hidden.value = selYear + '-' + String(selMonth).padStart(2,'0');
+					hidden.value = selYear + '-' + String(selMonth).padStart(2, '0');
 					input.value = hidden.value;
 					dropdown.classList.remove('show');
 					render();
@@ -872,42 +926,42 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 				grid.appendChild(btn);
 			}
 		}
-		input.addEventListener('click', function(e){
+		input.addEventListener('click', function (e) {
 			e.stopPropagation();
 			dropdown.classList.toggle('show');
 			// close year picker if open
 			var yd = document.getElementById('yearPickerDropdown');
-			if(yd) yd.classList.remove('show');
+			if (yd) yd.classList.remove('show');
 		});
-		dropdown.addEventListener('click', function(e){ e.stopPropagation(); });
-		document.getElementById('mpPrev').addEventListener('click', function(){ dispYear--; render(); });
-		document.getElementById('mpNext').addEventListener('click', function(){ dispYear++; render(); });
+		dropdown.addEventListener('click', function (e) { e.stopPropagation(); });
+		document.getElementById('mpPrev').addEventListener('click', function () { dispYear--; render(); });
+		document.getElementById('mpNext').addEventListener('click', function () { dispYear++; render(); });
 		render();
 	})();
 
 	// === Custom Year Picker ===
-	(function(){
+	(function () {
 		var input = document.getElementById('yearPickerInput');
 		var dropdown = document.getElementById('yearPickerDropdown');
-		if(!input || !dropdown) return;
+		if (!input || !dropdown) return;
 		var grid = document.getElementById('ypGrid');
 		var label = document.getElementById('ypRangeLabel');
 		var hidden = document.getElementById('yearPickerValue');
 		var selYear = hidden.value ? parseInt(hidden.value) : new Date().getFullYear();
 		var startYear = selYear - (selYear % 12);
 
-		function render(){
+		function render() {
 			var endYear = startYear + 11;
 			label.textContent = startYear + ' \u2013 ' + endYear;
 			grid.innerHTML = '';
-			for(var y=startYear;y<=endYear;y++){
+			for (var y = startYear; y <= endYear; y++) {
 				var btn = document.createElement('button');
 				btn.type = 'button';
 				btn.className = 'cp-item';
 				btn.textContent = y;
-				if(y === selYear) btn.classList.add('active');
+				if (y === selYear) btn.classList.add('active');
 				btn.dataset.year = y;
-				btn.addEventListener('click', function(){
+				btn.addEventListener('click', function () {
 					selYear = parseInt(this.dataset.year);
 					hidden.value = selYear;
 					input.value = selYear;
@@ -917,25 +971,25 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 				grid.appendChild(btn);
 			}
 		}
-		input.addEventListener('click', function(e){
+		input.addEventListener('click', function (e) {
 			e.stopPropagation();
 			dropdown.classList.toggle('show');
 			// close month picker if open
 			var md = document.getElementById('monthPickerDropdown');
-			if(md) md.classList.remove('show');
+			if (md) md.classList.remove('show');
 		});
-		dropdown.addEventListener('click', function(e){ e.stopPropagation(); });
-		document.getElementById('ypPrev').addEventListener('click', function(){ startYear -= 12; render(); });
-		document.getElementById('ypNext').addEventListener('click', function(){ startYear += 12; render(); });
+		dropdown.addEventListener('click', function (e) { e.stopPropagation(); });
+		document.getElementById('ypPrev').addEventListener('click', function () { startYear -= 12; render(); });
+		document.getElementById('ypNext').addEventListener('click', function () { startYear += 12; render(); });
 		render();
 	})();
 
 	// Close all custom pickers on outside click
-	document.addEventListener('click', function(){
+	document.addEventListener('click', function () {
 		var md = document.getElementById('monthPickerDropdown');
 		var yd = document.getElementById('yearPickerDropdown');
-		if(md) md.classList.remove('show');
-		if(yd) yd.classList.remove('show');
+		if (md) md.classList.remove('show');
+		if (yd) yd.classList.remove('show');
 	});
 	$('.toggle').click(function () { $('#target').toggle('fast') });
 	document.addEventListener("DOMContentLoaded", function () { var el; window.TomSelect && (new TomSelect(el = document.getElementById('select-pos')), new TomSelect(el = document.getElementById('select-parameter'))) });
@@ -944,7 +998,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 	Highcharts.chart('analisa', {
 		chart: {
 			<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
-						events: {
+									events: {
 					load: function () {
 						let c = this;
 
@@ -972,7 +1026,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 		xAxis: [
 			{
 				<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
-							gridLineWidth: 0,          // Hapus grid vertikal
+										gridLineWidth: 0,          // Hapus grid vertikal
 					minorGridLineWidth: 0,     // Hapus grid minor
 					tickLength: 0,             // Opsional: hapus tick kecil
 				<?php } ?>
@@ -993,7 +1047,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 		yAxis: [
 			{
 				<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
-							min: 0,
+										min: 0,
 					max: 8,
 					gridLineWidth: 0,          // Hapus grid vertikal
 					minorGridLineWidth: 0,     // Hapus grid minor
