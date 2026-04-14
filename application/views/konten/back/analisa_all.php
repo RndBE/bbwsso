@@ -575,7 +575,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 												<div class="subheader">Akumulasi CH Harian <?= $tglPada ?></div>
 											</div>
 											<div class="h1 mb-0 me-2 mt-0"><?= $akumStr ?> mm</div>
-											<div class="h5 fw-normal mb-0 me-2 mt-0">
+											<div class="h5 fw-bold text-secondary mb-0 me-2 mt-0">
 												<?= $txtAkum ?>
 											</div>
 										</div>
@@ -1008,7 +1008,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 	Highcharts.chart('analisa', {
 		chart: {
 			<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
-																									events: {
+																											events: {
 					load: function () {
 						let c = this;
 
@@ -1036,7 +1036,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 		xAxis: [
 			{
 				<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
-																										gridLineWidth: 0,          // Hapus grid vertikal
+																												gridLineWidth: 0,          // Hapus grid vertikal
 					minorGridLineWidth: 0,     // Hapus grid minor
 					tickLength: 0,             // Opsional: hapus tick kecil
 				<?php } ?>
@@ -1057,7 +1057,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 		yAxis: [
 			{
 				<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
-																										min: 0,
+																												min: 0,
 					max: 8,
 					gridLineWidth: 0,          // Hapus grid vertikal
 					minorGridLineWidth: 0,     // Hapus grid minor
