@@ -240,6 +240,69 @@ class Beranda extends CI_Controller
 		return 0;
 	}
 
+	/**
+	 * Hitung debit (Q) menggunakan rating curve dari tabel rumus_rating_curve.
+	 * Rumus pangkat: Q = a * (MA + b)^c
+	 * Data bersumber dari tabel DB `rumus_rating_curve` — Periode kalibrasi 2023–2025
+	 *
+	 * @param string $idLogger  ID logger stasiun AWLR
+	 * @param float  $ma        Muka Air (meter)
+	 * @return float|null       Debit (m³/det), null jika di luar domain atau logger tidak dikenali
+	 */
+	function hitung_debit_rating_curve($idLogger, $ma)
+	{
+		// Cache statis agar tidak query DB berulang dalam satu request
+		static $cache = [];
+
+		if (!isset($cache[$idLogger])) {
+			$rows = $this->db
+				->where('id_logger', $idLogger)
+				->order_by('segmen', 'ASC')
+				->get('rumus_rating_curve')
+				->result();
+
+			if (empty($rows)) {
+				$cache[$idLogger] = null;
+			} else {
+				$cache[$idLogger] = $rows;
+			}
+		}
+
+		$segments = $cache[$idLogger];
+
+		if ($segments === null) {
+			return null; // Logger tidak punya rating curve di DB
+		}
+
+		// Ambil domain dari row pertama (semua row sama domain_min/max per logger)
+		$domainMin = (float) $segments[0]->domain_min;
+		$domainMax = (float) $segments[0]->domain_max;
+
+		// Validasi domain — jangan ekstrapolasi
+		if ($ma < $domainMin || $ma > $domainMax) {
+			return null; // Out of range
+		}
+
+		// Pilih segmen yang sesuai
+		foreach ($segments as $seg) {
+			$segMin = (float) $seg->ma_min;
+			$segMax = (float) $seg->ma_max;
+			$a = (float) $seg->koef_a;
+			$b = (float) $seg->koef_b;
+			$c = (float) $seg->koef_c;
+
+			if ($ma >= $segMin && $ma <= $segMax) {
+				$base = $ma + $b;
+				if ($base < 0) {
+					return 0; // Basis negatif, debit = 0
+				}
+				return $a * pow($base, $c);
+			}
+		}
+
+		return null;
+	}
+
 	public function index()
 	{
 		if ($this->session->userdata('logged_in')) {
@@ -352,6 +415,14 @@ class Beranda extends CI_Controller
 						if ($val['debit_awlr'] === '1' && $idLogger === '10063') {
 							$debit = $this->kalimeneng((float) $h);
 							$paramList[$ky]['nilai'] = number_format(max(0, (float) $debit), 2, '.', '');
+						} elseif ($val['debit_awlr'] === '1' && $idLogger !== '10063') {
+							// Rating curve untuk 5 stasiun AWLR (panduan_debit.md)
+							$debitRC = $this->hitung_debit_rating_curve($idLogger, (float) $h);
+							if ($debitRC !== null) {
+								$paramList[$ky]['nilai'] = number_format(max(0, (float) $debitRC), 2, '.', '');
+							} else {
+								$paramList[$ky]['nilai'] = $h;
+							}
 						} elseif ($val['nama_parameter'] === 'Debit' && $idLogger === '10249') {
 							$n2 = ($temp && isset($temp->sensor2)) ? (float) $temp->sensor2 : 0.0;
 							$paramList[$ky]['nilai'] = number_format($this->linear_interpolation($n2 * 100) * (float) $h, 2, '.', '');
@@ -587,6 +658,14 @@ class Beranda extends CI_Controller
 					if ($val['debit_awlr'] === '1' && $idLogger === '10063') {
 						$debit = $this->kalimeneng((float) $h);
 						$paramList[$ky]['nilai'] = number_format(max(0, (float) $debit), 2, '.', '');
+					} elseif ($val['debit_awlr'] === '1' && $idLogger !== '10063') {
+						// Rating curve untuk 5 stasiun AWLR (panduan_debit.md)
+						$debitRC = $this->hitung_debit_rating_curve($idLogger, (float) $h);
+						if ($debitRC !== null) {
+							$paramList[$ky]['nilai'] = number_format(max(0, (float) $debitRC), 2, '.', '');
+						} else {
+							$paramList[$ky]['nilai'] = $h;
+						}
 					} elseif ($val['nama_parameter'] === 'Debit' && $idLogger === '10249') {
 						$n2 = ($temp && isset($temp->sensor2)) ? (float) $temp->sensor2 : 0.0;
 						$paramList[$ky]['nilai'] = number_format($this->linear_interpolation($n2 * 100) * (float) $h, 2, '.', '');
@@ -768,6 +847,14 @@ class Beranda extends CI_Controller
 								$param[$ky]['nilai'] = number_format(0, 2, '.', '');
 							} else {
 								$param[$ky]['nilai'] = number_format($debit, 2, '.', '');
+							}
+						} elseif ($val['debit_awlr'] == '1' and $id_logger != '10063') {
+							// Rating curve untuk 5 stasiun AWLR (panduan_debit.md)
+							$debitRC = $this->hitung_debit_rating_curve($id_logger, (float) $h);
+							if ($debitRC !== null) {
+								$param[$ky]['nilai'] = number_format(max(0, (float) $debitRC), 2, '.', '');
+							} else {
+								$param[$ky]['nilai'] = $h;
 							}
 						} elseif ($val['nama_parameter'] == 'Debit' and $id_logger == '10249') {
 							$n2 = $temp_data->sensor2;

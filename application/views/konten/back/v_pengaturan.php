@@ -31,6 +31,11 @@
 									<svg  xmlns="http://www.w3.org/2000/svg"  width="24"  height="24"  viewBox="0 0 24 24"  fill="none"  stroke="currentColor"  stroke-width="2"  stroke-linecap="round"  stroke-linejoin="round"  class="icon icon-tabler icons-tabler-outline icon-tabler-download me-2"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" /><path d="M7 11l5 5l5 -5" /><path d="M12 4l0 12" /></svg>
 									Unduh Aplikasi</a>
 							</li>
+							<li class="list-group-item py-0 px-0 bg-light bg-<?= ($this->uri->segment(2) == 'rating_curve') ? 'dark-lt' : '' ?>">
+								<a href="<?= base_url() ?>pengaturan/rating_curve" class="w-100 text-dark d-flex justify-content-center py-3">
+									<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-chart-line me-2"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 19l16 0" /><path d="M4 15l4 -6l4 2l4 -5l4 4" /></svg>
+									Rumus Rating Curve</a>
+							</li>
 							<!--
 	   <li class="list-group-item py-0 px-0 bg-light" >
 		<a href="<?= base_url()  ?>pengaturan/tingkat_status_awlr" class="w-100 text-dark d-flex justify-content-center py-3"><!-- Download SVG icon from http://tabler-icons.io/i/home 

@@ -138,4 +138,131 @@ class Pengaturan extends CI_Controller {
 			redirect('pengaturan/tingkat_siaga_awlr');
 		}
 	}
+
+	// ============================================================
+	// Rating Curve (Q = a * (MA + b)^c) — CRUD
+	// ============================================================
+
+	public function rating_curve()
+	{
+		$rows = $this->db
+			->order_by('id_logger', 'ASC')
+			->order_by('segmen', 'ASC')
+			->get('rumus_rating_curve')
+			->result();
+
+		// Kelompokkan per id_logger
+		$grouped = [];
+		foreach ($rows as $r) {
+			$grouped[$r->id_logger][] = $r;
+		}
+
+		$data['data_stasiun'] = $grouped;
+		$data['konten'] = 'konten/back/v_pengaturan';
+		$data['setting'] = 'konten/back/rating_curve';
+		$this->load->view('template_admin/site', $data);
+	}
+
+	public function simpan_rating_curve()
+	{
+		$mode = $this->input->post('mode');
+
+		if ($mode === 'stasiun_baru') {
+			$idLogger   = $this->input->post('id_logger');
+			$nama       = $this->input->post('nama_stasiun');
+			$domainMin  = $this->input->post('domain_min');
+			$domainMax  = $this->input->post('domain_max');
+			$periode    = $this->input->post('periode_kalibrasi');
+			$sumber     = $this->input->post('sumber_penurunan');
+
+			$maMin = $this->input->post('seg_ma_min');
+			$maMax = $this->input->post('seg_ma_max');
+			$aList = $this->input->post('seg_a');
+			$bList = $this->input->post('seg_b');
+			$cList = $this->input->post('seg_c');
+
+			for ($i = 0; $i < count($maMin); $i++) {
+				$this->db->insert('rumus_rating_curve', [
+					'id_logger'         => $idLogger,
+					'nama_stasiun'      => $nama,
+					'domain_min'        => $domainMin,
+					'domain_max'        => $domainMax,
+					'segmen'            => $i + 1,
+					'ma_min'            => $maMin[$i],
+					'ma_max'            => $maMax[$i],
+					'koef_a'            => $aList[$i],
+					'koef_b'            => $bList[$i],
+					'koef_c'            => $cList[$i],
+					'sumber_penurunan'  => $sumber,
+					'periode_kalibrasi' => $periode,
+				]);
+			}
+		} elseif ($mode === 'segmen_baru') {
+			$idLogger  = $this->input->post('id_logger');
+			$nama      = $this->input->post('nama_stasiun');
+			$domainMin = $this->input->post('domain_min');
+			$domainMax = $this->input->post('domain_max');
+			$periode   = $this->input->post('periode_kalibrasi');
+			$sumber    = $this->input->post('sumber_penurunan');
+
+			$maMin = $this->input->post('seg_ma_min');
+			$maMax = $this->input->post('seg_ma_max');
+			$aList = $this->input->post('seg_a');
+			$bList = $this->input->post('seg_b');
+			$cList = $this->input->post('seg_c');
+
+			// Cari nomor segmen terakhir
+			$last = $this->db
+				->select_max('segmen')
+				->where('id_logger', $idLogger)
+				->get('rumus_rating_curve')
+				->row();
+			$nextSeg = ($last && $last->segmen) ? (int) $last->segmen + 1 : 1;
+
+			for ($i = 0; $i < count($maMin); $i++) {
+				$this->db->insert('rumus_rating_curve', [
+					'id_logger'         => $idLogger,
+					'nama_stasiun'      => $nama,
+					'domain_min'        => $domainMin,
+					'domain_max'        => $domainMax,
+					'segmen'            => $nextSeg + $i,
+					'ma_min'            => $maMin[$i],
+					'ma_max'            => $maMax[$i],
+					'koef_a'            => $aList[$i],
+					'koef_b'            => $bList[$i],
+					'koef_c'            => $cList[$i],
+					'sumber_penurunan'  => $sumber ?: 'Grafis-analitis',
+					'periode_kalibrasi' => $periode ?: '2023-2025',
+				]);
+			}
+		}
+
+		redirect('pengaturan/rating_curve');
+	}
+
+	public function update_rating_curve()
+	{
+		$id = $this->input->post('id');
+		$this->db->where('id', $id)->update('rumus_rating_curve', [
+			'domain_min'        => $this->input->post('domain_min'),
+			'domain_max'        => $this->input->post('domain_max'),
+			'segmen'            => $this->input->post('segmen'),
+			'ma_min'            => $this->input->post('ma_min'),
+			'ma_max'            => $this->input->post('ma_max'),
+			'koef_a'            => $this->input->post('koef_a'),
+			'koef_b'            => $this->input->post('koef_b'),
+			'koef_c'            => $this->input->post('koef_c'),
+			'sumber_penurunan'  => $this->input->post('sumber_penurunan'),
+			'periode_kalibrasi' => $this->input->post('periode_kalibrasi'),
+		]);
+
+		redirect('pengaturan/rating_curve');
+	}
+
+	public function hapus_rating_curve()
+	{
+		$id = $this->input->post('id');
+		$this->db->where('id', $id)->delete('rumus_rating_curve');
+		redirect('pengaturan/rating_curve');
+	}
 }
