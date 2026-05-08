@@ -57,6 +57,54 @@ class Analisa extends CI_Controller
 		return 0;
 	}
 
+	function hitung_debit_rating_curve($idLogger, $ma)
+	{
+		static $cache = [];
+
+		if (!isset($cache[$idLogger])) {
+			$rows = $this->db
+				->where('id_logger', $idLogger)
+				->order_by('segmen', 'ASC')
+				->get('rumus_rating_curve')
+				->result();
+
+			$cache[$idLogger] = empty($rows) ? null : $rows;
+		}
+
+		$segments = $cache[$idLogger];
+		if ($segments === null) {
+			return null;
+		}
+
+		$domainMin = (float) $segments[0]->domain_min;
+		$domainMax = (float) $segments[0]->domain_max;
+		if ($ma < $domainMin || $ma > $domainMax) {
+			return null;
+		}
+
+		foreach ($segments as $seg) {
+			$segMin = (float) $seg->ma_min;
+			$segMax = (float) $seg->ma_max;
+
+			if ($ma >= $segMin && $ma <= $segMax) {
+				$base = $ma + (float) $seg->koef_b;
+				if ($base < 0) {
+					return 0;
+				}
+
+				return (float) $seg->koef_a * pow($base, (float) $seg->koef_c);
+			}
+		}
+
+		return null;
+	}
+
+	function nilai_debit_rating_curve($idLogger, $ma, $fallback)
+	{
+		$debit = $this->hitung_debit_rating_curve($idLogger, (float) $ma);
+		return ($debit !== null) ? max(0, (float) $debit) : $fallback;
+	}
+
 
 	function debit_interpolation($x)
 	{
@@ -633,6 +681,10 @@ class Analisa extends CI_Controller
 						$min_data = $this->kalimeneng($r->min);
 						$max_data = $this->kalimeneng($r->max);
 					}
+				} elseif ($namaParameter === 'Debit' && $idLogger !== '10249') {
+					$h = $this->nilai_debit_rating_curve($idLogger, $h, $h);
+					$min_data = $this->nilai_debit_rating_curve($idLogger, $min_data, $min_data);
+					$max_data = $this->nilai_debit_rating_curve($idLogger, $max_data, $max_data);
 				} elseif ($namaParameter === 'Debit_Aliran_Sungai') {
 					$avg_debit = $this->debit_interpolation(($r->avg_diff));
 					$min_debit = $this->debit_interpolation(($r->min_diff));

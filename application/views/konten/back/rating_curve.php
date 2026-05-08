@@ -1,10 +1,10 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
 <style>
-	.badge-segmen { font-size: 0.7rem; padding: 0.25em 0.6em; }
+	.badge-segmen { font-size: 0.7rem; padding: 0.25em 0.6em; background-color: #f9d643 !important; color: #000 !important; }
 	.rumus-preview { font-family: 'Courier New', monospace; font-size: 0.85rem; color: #1e293b; }
 	.domain-label { font-size: 0.78rem; color: #64748b; }
 	.table-rating td, .table-rating th { vertical-align: middle; }
-	.card-stasiun { border-left: 3px solid #0ea5e9; }
+	.card-stasiun { border-left: 3px solid #303481; }
 	.card-stasiun .card-header { background: #f8fafc; }
 	.btn-add-segmen { border-style: dashed; }
 </style>

@@ -781,6 +781,54 @@ class Api extends CI_Controller
 		return 0;
 	}
 
+	function hitung_debit_rating_curve($idLogger, $ma)
+	{
+		static $cache = [];
+
+		if (!isset($cache[$idLogger])) {
+			$rows = $this->db
+				->where('id_logger', $idLogger)
+				->order_by('segmen', 'ASC')
+				->get('rumus_rating_curve')
+				->result();
+
+			$cache[$idLogger] = empty($rows) ? null : $rows;
+		}
+
+		$segments = $cache[$idLogger];
+		if ($segments === null) {
+			return null;
+		}
+
+		$domainMin = (float) $segments[0]->domain_min;
+		$domainMax = (float) $segments[0]->domain_max;
+		if ($ma < $domainMin || $ma > $domainMax) {
+			return null;
+		}
+
+		foreach ($segments as $seg) {
+			$segMin = (float) $seg->ma_min;
+			$segMax = (float) $seg->ma_max;
+
+			if ($ma >= $segMin && $ma <= $segMax) {
+				$base = $ma + (float) $seg->koef_b;
+				if ($base < 0) {
+					return 0;
+				}
+
+				return (float) $seg->koef_a * pow($base, (float) $seg->koef_c);
+			}
+		}
+
+		return null;
+	}
+
+	function nilai_debit_rating_curve($idLogger, $ma, $fallback)
+	{
+		$debit = $this->hitung_debit_rating_curve($idLogger, (float) $ma);
+		return ($debit !== null) ? max(0, (float) $debit) : $fallback;
+	}
+
 	function dtakhir()
 	{
 		$idlog = $this->input->get('idlogger');
@@ -802,6 +850,8 @@ class Api extends CI_Controller
 
 						$debit = $this->kalimeneng((float) $h);
 						$h = $h < 0 ? 0 : $debit;
+					} elseif ($s->debit_awlr == '1' && $idlog != '10249') {
+						$h = $this->nilai_debit_rating_curve($idlog, $h, $h);
 					} elseif ($s->nama_parameter == 'Debit' && $idlog == '10249') {
 						$h = $this->linear_interpolation($qdata->sensor2 * 100) * $h;
 					} elseif ($s->nama_parameter == 'Luas_Penampang_Basah') {
@@ -878,18 +928,20 @@ class Api extends CI_Controller
 				$max_value = $datalog->max;
 				$min_value = $datalog->min;
 
-				if ($cek_rumus && $namaparameter == 'Debit') {
-					$rumus = $this->db->where('id_logger', $idlogger)->get('rumus_debit')->row()->rumus;
-					if ($h < 0) {
-						$avg = number_format(0, 2, '.', '');
+				if ($cek_rumus && $namaparameter == 'Debit' && $idlogger == '10063') {
+					if ($h < 0 || $min_value < 0 || $max_value < 0) {
+						$h = max(0, $h);
+						$min_value = max(0, $min_value);
+						$max_value = max(0, $max_value);
 					} else {
-						$debit_avg = eval ('return ' . $rumus . ';');
-						$h = $min_value;
-						$min_value = eval ('return ' . $rumus . ';');
-						$h = $max_value;
-						$max_value = eval ('return ' . $rumus . ';');
-						$h = $debit_avg;
+						$h = $this->kalimeneng($h);
+						$min_value = $this->kalimeneng($min_value);
+						$max_value = $this->kalimeneng($max_value);
 					}
+				} elseif ($cek_rumus && $namaparameter == 'Debit' && $idlogger != '10249') {
+					$h = $this->nilai_debit_rating_curve($idlogger, $h, $h);
+					$min_value = $this->nilai_debit_rating_curve($idlogger, $min_value, $min_value);
+					$max_value = $this->nilai_debit_rating_curve($idlogger, $max_value, $max_value);
 				}
 				if ($namaparameter == 'Debit' and $idlogger == '10249') {
 					if ($h < 0) {
@@ -1015,18 +1067,20 @@ class Api extends CI_Controller
 				$max_value = $datalog->max;
 				$min_value = $datalog->min;
 
-				if ($cek_rumus && $namaparameter == 'Debit') {
-					$rumus = $this->db->where('id_logger', $idlogger)->get('rumus_debit')->row()->rumus;
-					if ($h < 0) {
-						$avg = number_format(0, 2, '.', '');
+				if ($cek_rumus && $namaparameter == 'Debit' && $idlogger == '10063') {
+					if ($h < 0 || $min_value < 0 || $max_value < 0) {
+						$h = max(0, $h);
+						$min_value = max(0, $min_value);
+						$max_value = max(0, $max_value);
 					} else {
-						$debit_avg = eval ('return ' . $rumus . ';');
-						$h = $min_value;
-						$min_value = eval ('return ' . $rumus . ';');
-						$h = $max_value;
-						$max_value = eval ('return ' . $rumus . ';');
-						$h = $debit_avg;
+						$h = $this->kalimeneng($h);
+						$min_value = $this->kalimeneng($min_value);
+						$max_value = $this->kalimeneng($max_value);
 					}
+				} elseif ($cek_rumus && $namaparameter == 'Debit' && $idlogger != '10249') {
+					$h = $this->nilai_debit_rating_curve($idlogger, $h, $h);
+					$min_value = $this->nilai_debit_rating_curve($idlogger, $min_value, $min_value);
+					$max_value = $this->nilai_debit_rating_curve($idlogger, $max_value, $max_value);
 				}
 				if ($namaparameter == 'Debit' and $idlogger == '10249') {
 					if ($h < 0) {
@@ -1154,18 +1208,20 @@ class Api extends CI_Controller
 				$max_value = $datalog->max;
 				$min_value = $datalog->min;
 
-				if ($cek_rumus && $namaparameter == 'Debit') {
-					$rumus = $this->db->where('id_logger', $idlogger)->get('rumus_debit')->row()->rumus;
-					if ($h < 0) {
-						$avg = number_format(0, 2, '.', '');
+				if ($cek_rumus && $namaparameter == 'Debit' && $idlogger == '10063') {
+					if ($h < 0 || $min_value < 0 || $max_value < 0) {
+						$h = max(0, $h);
+						$min_value = max(0, $min_value);
+						$max_value = max(0, $max_value);
 					} else {
-						$debit_avg = eval ('return ' . $rumus . ';');
-						$h = $min_value;
-						$min_value = eval ('return ' . $rumus . ';');
-						$h = $max_value;
-						$max_value = eval ('return ' . $rumus . ';');
-						$h = $debit_avg;
+						$h = $this->kalimeneng($h);
+						$min_value = $this->kalimeneng($min_value);
+						$max_value = $this->kalimeneng($max_value);
 					}
+				} elseif ($cek_rumus && $namaparameter == 'Debit' && $idlogger != '10249') {
+					$h = $this->nilai_debit_rating_curve($idlogger, $h, $h);
+					$min_value = $this->nilai_debit_rating_curve($idlogger, $min_value, $min_value);
+					$max_value = $this->nilai_debit_rating_curve($idlogger, $max_value, $max_value);
 				}
 
 				if ($namaparameter == 'Debit' and $idlogger == '10249') {
@@ -1285,18 +1341,20 @@ class Api extends CI_Controller
 				$max_value = $datalog->max;
 				$min_value = $datalog->min;
 
-				if ($cek_rumus && $namaparameter == 'Debit') {
-					$rumus = $this->db->where('id_logger', $idlogger)->get('rumus_debit')->row()->rumus;
-					if ($h < 0) {
-						$avg = number_format(0, 2, '.', '');
+				if ($cek_rumus && $namaparameter == 'Debit' && $idlogger == '10063') {
+					if ($h < 0 || $min_value < 0 || $max_value < 0) {
+						$h = max(0, $h);
+						$min_value = max(0, $min_value);
+						$max_value = max(0, $max_value);
 					} else {
-						$debit_avg = eval ('return ' . $rumus . ';');
-						$h = $min_value;
-						$min_value = eval ('return ' . $rumus . ';');
-						$h = $max_value;
-						$max_value = eval ('return ' . $rumus . ';');
-						$h = $debit_avg;
+						$h = $this->kalimeneng($h);
+						$min_value = $this->kalimeneng($min_value);
+						$max_value = $this->kalimeneng($max_value);
 					}
+				} elseif ($cek_rumus && $namaparameter == 'Debit' && $idlogger != '10249') {
+					$h = $this->nilai_debit_rating_curve($idlogger, $h, $h);
+					$min_value = $this->nilai_debit_rating_curve($idlogger, $min_value, $min_value);
+					$max_value = $this->nilai_debit_rating_curve($idlogger, $max_value, $max_value);
 				}
 
 				if ($namaparameter == 'Debit' and $idlogger == '10249') {
