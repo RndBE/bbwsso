@@ -221,15 +221,15 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 							class="status-indicator-circle"></span></span>
 				<?php } ?>
 			</div>
+			<?php if (isset($aset) && $aset === 'psda'): ?>
+				<div class="col-auto">
+					<img src="<?= base_url() ?>image/logo_jogja.png" alt="DPUPESDM DIY"
+						title="Logger DPUPESDM DIY"
+						style="height:48px;width:auto;">
+				</div>
+			<?php endif; ?>
 			<div class="col col-md-auto">
-				<h2 class="page-title mb-1 d-flex align-items-center">
-					<?= htmlspecialchars($temp_data['nama_lokasi'], ENT_QUOTES) ?>
-					<?php if (isset($aset) && $aset === 'psda'): ?>
-						<img src="<?= base_url() ?>image/diy_white.svg" alt="DPUPESDM DIY"
-							title="Logger DPUPESDM DIY"
-							style="height:22px;width:auto;margin-left:10px;">
-					<?php endif; ?>
-				</h2>
+				<h2 class="page-title mb-1"><?= htmlspecialchars($temp_data['nama_lokasi'], ENT_QUOTES) ?></h2>
 				<div class="text-muted">
 					<ul class="list-inline list-inline-dots mb-0">
 						<li class="list-inline-item">
@@ -319,13 +319,9 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 											<?php foreach ($pilih_pos as $mnpos):
 												$merge = explode('_', $mnpos->idLogger);
 												$log_select = $merge[0];
-												$pos_aset = isset($merge[1]) ? $merge[1] : '';
 												?>
 
-												<option value="<?= $mnpos->idLogger ?>"
-													data-aset="<?= htmlspecialchars($pos_aset, ENT_QUOTES) ?>"
-													<?= ($idLogger == $log_select) ? 'selected' : '' ?>>
-													<?= str_replace('_', ' ', $mnpos->namaPos) ?>
+												<option value="<?= $mnpos->idLogger ?>" <?= ($idLogger == $log_select) ? 'selected' : '' ?>><?= str_replace('_', ' ', $mnpos->namaPos) ?>
 												</option>
 											<?php endforeach ?>
 										</select>
@@ -1013,28 +1009,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 		if (yd) yd.classList.remove('show');
 	});
 	$('.toggle').click(function () { $('#target').toggle('fast') });
-	document.addEventListener("DOMContentLoaded", function () {
-		if (!window.TomSelect) return;
-		var diyLogo = '<?= base_url() ?>image/diy_white.svg';
-		var posSel = document.getElementById('select-pos');
-		var renderPos = function (data, escape) {
-			var aset = '';
-			if (data.$option && data.$option.getAttribute) {
-				aset = data.$option.getAttribute('data-aset') || '';
-			}
-			if (!aset && posSel) {
-				var opt = posSel.querySelector('option[value="' + data.value + '"]');
-				if (opt) aset = opt.getAttribute('data-aset') || '';
-			}
-			var logo = (aset === 'psda')
-				? '<img src="' + diyLogo + '" alt="DIY" style="height:16px;width:auto;margin-left:6px;vertical-align:middle;">'
-				: '';
-			return '<div class="d-flex align-items-center justify-content-between">' +
-				'<span>' + escape(data.text) + '</span>' + logo + '</div>';
-		};
-		new TomSelect('#select-pos', { render: { option: renderPos, item: renderPos } });
-		new TomSelect('#select-parameter');
-	});
+	document.addEventListener("DOMContentLoaded", function () { var el; window.TomSelect && (new TomSelect(el = document.getElementById('select-pos')), new TomSelect(el = document.getElementById('select-parameter'))) });
 	function ExportToExcel(type, fn, dl) { var elt = document.getElementById('tbl_exporttable_to_xls'); var wb = XLSX.utils.table_to_book(elt, { sheet: "sheet1" }); return dl ? XLSX.write(wb, { bookType: type, bookSST: true, type: 'base64' }) : XLSX.writeFile(wb, fn || ('<?= $namafile ?>.' + (type || 'xlsx'))) }
 	function validate_form() { var v = $('#select-pos').val(); if (v != '') { $('#form-pos').submit() } }
 	Highcharts.chart('analisa', {
