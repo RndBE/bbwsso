@@ -797,6 +797,7 @@ class Analisa extends CI_Controller
 			$payload['temp_data'] = json_decode(json_encode($data_psda->temp_data), true);
 		}
 		$payload['token'] = $string;
+		$payload['aset'] = $aset;
 		$payload['konten'] = 'konten/back/analisa_all';
 
 		$this->load->view('template_admin/site', $payload);
