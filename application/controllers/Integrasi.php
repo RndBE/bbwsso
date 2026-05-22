@@ -862,6 +862,227 @@ class Integrasi extends CI_Controller
 		]);
 	}
 
+	// ─── Mobile API (dipanggil oleh DPUPESDM Api.php publik) ───────────
+
+	/**
+	 * Return list 7 pos DIY dengan field lengkap untuk konsumen mobile API
+	 * DPUPESDM (list_logger, daftar_pos, lokasi_new, pilih_pos*). Setiap
+	 * pos sudah ter-resolve status koneksi, koordinat, alamat, kabupaten,
+	 * kontak PIC. Filter optional via ?kategori=awlr|arr.
+	 */
+	public function api_list()
+	{
+		$kategori = $this->input->get('kategori');
+		$awal = date('Y-m-d H:i', mktime(date('H') - 1, 0, 0, date('m'), date('d'), date('Y')));
+
+		$this->db
+			->select('t_logger.*, t_lokasi.nama_lokasi, t_lokasi.latitude, t_lokasi.longitude, t_lokasi.alamat, t_lokasi.das, kategori_logger.tabel as icon, kategori_logger.nama_kategori, kategori_logger.id_katlogger, kategori_logger.temp_data, kategori_logger.controller, t_informasi.nama_pic, t_informasi.no_pic, t_informasi.nosell')
+			->from('t_logger')
+			->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
+			->join('kategori_logger', 'kategori_logger.id_katlogger = t_logger.kategori_log')
+			->join('t_informasi', 't_informasi.logger_id = t_logger.id_logger', 'left')
+			->where_in('t_logger.id_logger', $this->diy_loggers)
+			->order_by('t_logger.id_logger', 'ASC');
+		if ($kategori) {
+			$this->db->where('kategori_logger.tabel', $kategori);
+		}
+		$rows = $this->db->get()->result();
+
+		// Mapping kategori untuk DPUPESDM
+		$kat_map = ['awlr' => 'Duga Air Sungai', 'arr' => 'Curah Hujan', 'awr' => 'Stasiun Cuaca'];
+
+		$out = [];
+		foreach ($rows as $r) {
+			$id_logger = $r->id_logger;
+			// kabupaten = parse alamat sederhana (cari "Kabupaten X" atau "Kulon Progo, DIY")
+			$kabupaten = '';
+			if (preg_match('/Kabupaten\s+([^,]+)/i', $r->alamat, $m)) {
+				$kabupaten = trim($m[1]);
+			} elseif (preg_match('/,\s*([^,]+)\s*,\s*(DIY|Daerah\s+Istimewa\s+Yogyakarta)/i', $r->alamat, $m)) {
+				$kabupaten = trim($m[1]);
+			}
+
+			$dt = $this->db->where('code_logger', $id_logger)->get($r->temp_data)->row();
+			$waktu = $dt ? $dt->waktu : null;
+			$koneksi = ($waktu && $waktu >= $awal) ? 'Terhubung' : 'Terputus';
+
+			$out[] = [
+				'id_logger' => $id_logger,
+				'id_logger_full' => $id_logger . '_bbws',
+				'nama_lokasi' => $r->nama_lokasi,
+				'latitude' => $r->latitude,
+				'longitude' => $r->longitude,
+				'alamat' => $r->alamat,
+				'kabupaten' => $kabupaten,
+				'das' => $r->das,
+				'icon' => $r->icon,
+				'kategori' => $kat_map[$r->icon] ?? $r->nama_kategori,
+				'katlog_id' => $r->id_katlogger,
+				'controller' => ($r->icon === 'arr') ? 'curah_hujan' : $r->controller,
+				'nama_pic' => $r->nama_pic ?? '',
+				'no_pic' => $r->no_pic ?? '',
+				'nomor_seluler' => $r->nosell ?? '',
+				'waktu' => $waktu,
+				'koneksi' => $koneksi,
+				'status_aset' => 'BBWS Serayu Opak',
+			];
+		}
+		echo json_encode($out);
+	}
+
+	/**
+	 * Mobile-shape chart data per pos BBWS DIY. Output mirror dari
+	 * DPUPESDM Api::data_range: array of rows
+	 * { Waktu, <Param1>: "value satuan", <Param2>: ..., Koneksi (last row) }.
+	 *
+	 * Parameter: id_logger, awal (Y-m-d), akhir (Y-m-d), interval (menit|jam|hari)
+	 */
+	public function api_data_range()
+	{
+		$id_logger = $this->input->get('id_logger');
+		$awal = $this->input->get('awal');
+		$akhir = $this->input->get('akhir');
+		$interval = $this->input->get('interval') ?: 'jam';
+
+		$this->_reject_non_diy($id_logger);
+		if (!$awal || !$akhir) {
+			echo json_encode(['status' => false, 'error' => 'Parameter awal/akhir wajib']);
+			return;
+		}
+
+		$log = $this->db->select('t_logger.tabel_main, kategori_logger.temp_data')
+			->from('t_logger')
+			->join('kategori_logger', 'kategori_logger.id_katlogger = t_logger.kategori_log')
+			->where('t_logger.id_logger', $id_logger)
+			->get()->row();
+		if (!$log) {
+			echo json_encode([]);
+			return;
+		}
+
+		$params = $this->db->where('logger_id', $id_logger)
+			->order_by('CAST(SUBSTR(kolom_sensor,7) AS UNSIGNED)', '', false)
+			->get('parameter_sensor')->result();
+		$selects = [];
+		foreach ($params as $p) {
+			$alias = $p->nama_parameter;
+			$field = $p->kolom_sensor;
+			$sat = $p->satuan;
+			if ($interval === 'menit') {
+				$selects[] = "$field as `$alias`";
+			} else {
+				if ($sat === 'mm') {
+					$selects[] = "CONCAT(FORMAT(SUM($field),2), ' $sat') as `$alias`";
+				} else {
+					$selects[] = "CONCAT(FORMAT(AVG($field),3), ' $sat') as `$alias`";
+				}
+			}
+		}
+		if (!$selects) {
+			echo json_encode([]);
+			return;
+		}
+
+		if ($interval === 'menit') {
+			$sql = "SELECT waktu as Waktu, " . implode(',', $selects)
+				. " FROM {$log->tabel_main} WHERE code_logger=? AND waktu BETWEEN ? AND ?";
+			$rows = $this->db->query($sql, [$id_logger, $awal . ' 00:00', $akhir . ' 23:59'])->result_array();
+		} else {
+			$interval_num = ($interval === 'hari') ? 1440 : 60;
+			$waktu_select = ($interval === 'hari')
+				? "DATE_FORMAT(FROM_UNIXTIME(ROUND(UNIX_TIMESTAMP(waktu)/(5*60))*(5*60)), '%Y-%m-%d')"
+				: "FROM_UNIXTIME(ROUND(UNIX_TIMESTAMP(waktu)/(5*60))*(5*60))";
+			$sql = "SELECT $waktu_select AS Waktu, " . implode(',', $selects)
+				. " FROM {$log->tabel_main} WHERE code_logger=? AND waktu BETWEEN ? AND ?"
+				. " GROUP BY TIMESTAMPDIFF(MINUTE,'1970-01-01 00:00:00',waktu) DIV $interval_num";
+			$rows = $this->db->query($sql, [$id_logger, $awal . ' 00:00', $akhir . ' 23:59'])->result_array();
+		}
+
+		// Status koneksi (logger sehat?)
+		$dt = $this->db->where('code_logger', $id_logger)->get($log->temp_data)->row();
+		$awal_kon = date('Y-m-d H:i', mktime(date('H') - 1, 0, 0, date('m'), date('d'), date('Y')));
+		$koneksi = ($dt && $dt->waktu >= $awal_kon) ? 'Terhubung' : 'Terputus';
+		if (count($rows) > 0) {
+			$rows[0]['Koneksi'] = $koneksi;
+		} else {
+			$rows[] = ['Koneksi' => $koneksi];
+		}
+
+		echo json_encode($rows);
+	}
+
+	/**
+	 * Data terakhir per logger (mobile API mirror of DPUPESDM Api::dtakhir).
+	 * Return semua parameter logger dengan nilai terbarunya.
+	 */
+	public function api_dtakhir()
+	{
+		$id_logger = $this->input->get('idlogger') ?: $this->input->get('id_logger');
+		$this->_reject_non_diy($id_logger);
+
+		$log = $this->db
+			->select('t_logger.tabel_main, kategori_logger.temp_data, t_lokasi.nama_lokasi')
+			->from('t_logger')
+			->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
+			->join('kategori_logger', 'kategori_logger.id_katlogger = t_logger.kategori_log')
+			->where('t_logger.id_logger', $id_logger)
+			->get()->row();
+		if (!$log) {
+			echo json_encode(['data_terakhir' => []]);
+			return;
+		}
+
+		$dt = $this->db->where('code_logger', $id_logger)
+			->order_by('waktu', 'desc')->limit(1)
+			->get($log->temp_data)->row();
+		if (!$dt) {
+			$dt = $this->db->where('code_logger', $id_logger)
+				->order_by('waktu', 'desc')->limit(1)
+				->get($log->tabel_main)->row();
+		}
+
+		$perbaikan = $this->db->where('id_logger', $id_logger)->get('t_perbaikan')->row();
+
+		$params = $this->db->query(
+			"SELECT * FROM parameter_sensor WHERE logger_id = ? ORDER BY CAST(SUBSTR(kolom_sensor,7) AS UNSIGNED)",
+			[$id_logger]
+		)->result();
+
+		$data_terakhir = [];
+		foreach ($params as $p) {
+			$kolom = $p->kolom_sensor;
+			$h = ($dt && isset($dt->$kolom)) ? $dt->$kolom : 0;
+			// Rating curve untuk Debit
+			if ($p->nama_parameter === 'Debit') {
+				$rc = $this->_hitung_debit_rating_curve($id_logger, (float) $h);
+				if ($rc !== null) $h = max(0, $rc);
+			} elseif ($p->nama_parameter === 'Debit_Aliran_Sungai' && $dt) {
+				$diff = (float) ($dt->sensor1 ?? 0) - (float) ($dt->sensor2 ?? 0);
+				$h = (float) $this->_debit_interpolation($diff);
+			}
+			$data_terakhir[] = [
+				'idsensor' => $p->id_param . '_bbws',
+				'sensor' => $p->nama_parameter,
+				'data' => number_format((float) $h, 2, '.', ''),
+				'satuan' => $p->satuan,
+				'icon' => $p->nama_parameter,
+				'tipe_graf' => $p->tipe_graf ?: ($p->satuan === 'mm' ? 'column' : 'spline'),
+			];
+		}
+
+		$out = [
+			'nama_logger' => $log->nama_lokasi,
+			'waktu' => $dt ? $dt->waktu : '',
+			'tabel' => $log->tabel_main,
+			'status_aset' => 'BBWS Serayu Opak',
+			'data_terakhir' => $data_terakhir,
+		];
+		if ($perbaikan) {
+			$out['status'] = 'perbaikan';
+		}
+		echo json_encode($out);
+	}
+
 	private function _marker_state($icon, $perb, $waktu, $awal, $data_p)
 	{
 		$base = base_url() . 'pin_marker/';

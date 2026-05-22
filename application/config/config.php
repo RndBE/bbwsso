@@ -31,7 +31,7 @@ if (isset($_SERVER['HTTP_HOST'])) {
 	$config['base_url'] = 'https://bbwsso.monitoring4system.com/';
 }
 
-$config['base_url'] = 'http://bbwsso.host/';
+//$config['base_url'] = 'http://bbwsso.host/';
 
 /*
 |--------------------------------------------------------------------------
