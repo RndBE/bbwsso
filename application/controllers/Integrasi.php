@@ -591,10 +591,14 @@ class Integrasi extends CI_Controller
 			$id_logger = $log->id_logger;
 			$temp_tbl = $log->temp_data;
 			$tabel_main = $log->tabel_main;
-			$nama_kat = $log->nama_kategori;
-			// ARR diperlakukan sebagai "Curah Hujan" agar match dengan kategori beranda DPUPESDM
-			if ($log->icon === 'arr') {
+			// Mapping nama kategori BBWSSO → DPUPESDM agar merge di beranda DPUPESDM
+			// match section yang sama (AWLR → "Duga Air Sungai", ARR → "Curah Hujan")
+			if ($log->icon === 'awlr') {
+				$nama_kat = 'Duga Air Sungai';
+			} elseif ($log->icon === 'arr') {
 				$nama_kat = 'Curah Hujan';
+			} else {
+				$nama_kat = $log->nama_kategori;
 			}
 
 			$dt = $this->db->where('code_logger', $id_logger)->get($temp_tbl)->row();
@@ -616,6 +620,8 @@ class Integrasi extends CI_Controller
 				[$id_logger]
 			)->result_array();
 
+			$controller_dpupesdm = ($log->icon === 'awlr') ? 'awlr' : 'curah_hujan';
+
 			foreach ($params as $k => $p) {
 				$kolom = $p['kolom_sensor'];
 				$nilai = '-';
@@ -635,7 +641,9 @@ class Integrasi extends CI_Controller
 				$params[$k]['nilai'] = $nilai;
 				$params[$k]['alias_sensor'] = $p['nama_parameter'];
 				$params[$k]['field_sensor'] = $p['kolom_sensor'];
-				$params[$k]['link'] = 'https://bbwsso.monitoring4system.com/analisa/set_sensordash?id_param=' . $p['id_param'] . '_bbws';
+				// Link relatif → DPUPESDM Beranda akan prepend base_url + handle in-place
+				$params[$k]['link_path'] = $controller_dpupesdm . '/set_sensordash?id_param=' . $p['id_param'] . '_bbws&id_logger=' . $id_logger;
+				$params[$k]['link'] = $params[$k]['link_path']; // fallback; akan diganti DPUPESDM jadi absolute URL lokal
 			}
 
 			if (!isset($kategori[$nama_kat])) {
@@ -652,6 +660,7 @@ class Integrasi extends CI_Controller
 				'waktu' => $dt ? $dt->waktu : '',
 				'status' => $status,
 				'warna' => $warna,
+				'icon' => $log->icon,
 				'status_aset' => 'BBWS Serayu Opak',
 				'parameter' => $params,
 			];
@@ -745,10 +754,22 @@ class Integrasi extends CI_Controller
 				}
 			}
 
-			$param_first = $this->db->where('logger_id', $id_logger)
-				->order_by('id_param', 'ASC')->limit(1)
-				->get('parameter_sensor')->row();
-			$id_param = $param_first ? ($param_first->id_param . '_bbws') : '';
+			// Pilih param default sesuai kategori (TMA sensor1 untuk AWLR; sensor9/8 untuk ARR)
+			$prefer_field = ($icon === 'awlr') ? 'sensor1' : 'sensor9';
+			$param_pick = $this->db->where('logger_id', $id_logger)
+				->where('kolom_sensor', $prefer_field)
+				->limit(1)->get('parameter_sensor')->row();
+			if (!$param_pick && $icon === 'arr') {
+				$param_pick = $this->db->where('logger_id', $id_logger)
+					->where('kolom_sensor', 'sensor8')
+					->limit(1)->get('parameter_sensor')->row();
+			}
+			if (!$param_pick) {
+				$param_pick = $this->db->where('logger_id', $id_logger)
+					->order_by('id_param', 'ASC')->limit(1)
+					->get('parameter_sensor')->row();
+			}
+			$id_param = $param_pick ? ($param_pick->id_param . '_bbws') : '';
 
 			$data_rekap[] = [
 				'id_logger' => $id_logger,
@@ -759,13 +780,12 @@ class Integrasi extends CI_Controller
 				'tabel' => $tabel,
 				'controller' => $log->controller,
 				'status_aset' => 'BBWS Serayu Opak',
-				'link' => 'https://bbwsso.monitoring4system.com/analisa/set_sensordash?id_param=' . $id_param,
 			];
 		}
 
 		echo json_encode([
 			'data_rekap' => $data_rekap,
-			'nama_logger' => $icon === 'awlr' ? 'AWLR' : 'Curah Hujan',
+			'nama_logger' => $icon === 'awlr' ? 'Duga Air Sungai' : 'Curah Hujan',
 		]);
 	}
 
