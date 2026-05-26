@@ -62,16 +62,10 @@
 	if($datapos != "kosong"){ ?>
 							<?php $judul = "Data ".$nama_lokasi. " pada ".  $this->session->userdata('data_tglawal') . " sampai ". $this->session->userdata('data_tglakhir') ?>
 
-							<form id="formExportExcel" action="<?= base_url() ?>datapos/export_excel" method="post" enctype="multipart/formdata">
-								<input type="hidden" name="title" value="<?= $judul?>"/>
-								<input type="hidden" name="parameter" id="exportParameter" value="<?= htmlspecialchars(json_encode($parameter->result_array())) ?>"/>
-								<input type="hidden" name="data" id="exportData" value=""/>
-								<button type="button" id="btnDownloadExcel" class="btn btn-success w-100"
-									data-tgl-awal="<?= $this->session->userdata('data_tglawal') ?>"
-									data-tgl-akhir="<?= $this->session->userdata('data_tglakhir') ?>"
-									data-id-logger="<?= $this->session->userdata('data_idlogger') ?>"
-									data-sesi="<?= $this->session->userdata('sesi_data') ?: 'hari' ?>">Download</button>
-							</form>
+							<button type="button" id="btnDownloadExcel" class="btn btn-success w-100"
+								data-tgl-awal="<?= $this->session->userdata('data_tglawal') ?>"
+								data-tgl-akhir="<?= $this->session->userdata('data_tglakhir') ?>"
+								data-judul="<?= htmlspecialchars($judul, ENT_QUOTES) ?>">Download</button>
 							<?php } ?>
 						</div>
 
@@ -228,6 +222,15 @@
 	</div>
 </div>
 
+<!-- Embed data dari PHP untuk diolah client-side -->
+<?php if ($datapos != "kosong"): ?>
+<script>
+	window.DATAPOS_DATA = <?= json_encode($datapos) ?>;
+	window.DATAPOS_PARAMETER = <?= json_encode($parameter->result_array()) ?>;
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<?php endif; ?>
+
 <script>
 (function(){
 	function start(){
@@ -244,7 +247,6 @@
 		var closeBtn = document.getElementById('downloadProgressClose');
 
 		function showModal(){
-			console.log('[DownloadExcel] showModal');
 			footer.style.display = 'none';
 			overlayEl.style.display = 'block';
 			modalEl.style.display = 'block';
@@ -273,91 +275,129 @@
 			if (isNaN(y) || isNaN(mo) || isNaN(d)) return null;
 			return new Date(y, mo, d, h, mi, 0);
 		}
-		function pad(n){ return n<10 ? '0'+n : ''+n; }
-		function fmtDt(dt){
-			return dt.getFullYear()+'-'+pad(dt.getMonth()+1)+'-'+pad(dt.getDate())+' '+pad(dt.getHours())+':'+pad(dt.getMinutes());
-		}
 		function diffDays(a,b){
 			return Math.ceil((b.getTime()-a.getTime()) / (1000*60*60*24));
 		}
 
-		function buildChunks(s, e){
-			var totalDays = diffDays(s, e);
-			var chunkDays;
-			if (totalDays > 30) chunkDays = 7;
-			else if (totalDays > 3) chunkDays = 3;
-			else return [{ a: s, b: e }];
-
-			var chunks = [];
-			var cur = new Date(s.getTime());
-			while (cur < e) {
-				var lastDay = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + chunkDays - 1, 23, 59, 59);
-				if (lastDay >= e) lastDay = new Date(e.getTime());
-				chunks.push({ a: new Date(cur.getTime()), b: lastDay });
-				cur = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() + 1, 0, 0, 0);
-			}
-			return chunks;
+		// Hitung jumlah chunk berdasarkan rentang tanggal (untuk visualisasi progress)
+		function calcChunkSize(totalDays){
+			if (totalDays > 30) return 7;   // > 1 bulan → per 1 minggu
+			if (totalDays > 3) return 3;    // > 3 hari → per 3 hari
+			return totalDays || 1;          // ≤ 3 hari → 1 chunk
 		}
 
-		function fetchChunk(idLogger, sesi, a, b){
-			var fd = new FormData();
-			fd.append('id_logger', idLogger);
-			fd.append('sesi', sesi);
-			fd.append('tgl_awal', fmtDt(a));
-			fd.append('tgl_akhir', fmtDt(b));
-			return fetch('<?= base_url() ?>datapos/chunk_data', { method:'POST', body: fd, credentials:'same-origin' })
-				.then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+		// Split data array menjadi N bagian dengan boundary harian (cur+chunkDays)
+		function splitDataByDateRange(data, startDt, chunkDays){
+			var groups = [];
+			var current = [];
+			var groupEnd = new Date(startDt.getFullYear(), startDt.getMonth(), startDt.getDate() + chunkDays, 0, 0, 0);
+			for (var i = 0; i < data.length; i++){
+				var row = data[i];
+				var rowDt = parseDt(row.waktu);
+				while (rowDt && rowDt >= groupEnd) {
+					groups.push(current);
+					current = [];
+					groupEnd = new Date(groupEnd.getFullYear(), groupEnd.getMonth(), groupEnd.getDate() + chunkDays, 0, 0, 0);
+				}
+				current.push(row);
+			}
+			if (current.length) groups.push(current);
+			return groups;
+		}
+
+		// Bersihkan judul untuk nama file
+		function sanitizeFilename(s){
+			return String(s).replace(/[\\\/:*?"<>|]/g, '_').slice(0, 120);
 		}
 
 		btn.addEventListener('click', function(ev){
 			ev.preventDefault();
 			console.log('[DownloadExcel] click fired');
-			var tglAwal = btn.dataset.tglAwal;
-			var tglAkhir = btn.dataset.tglAkhir;
-			var idLogger = btn.dataset.idLogger;
-			var sesi = btn.dataset.sesi || 'hari';
-			console.log('[DownloadExcel] params', {tglAwal, tglAkhir, idLogger, sesi});
 
-			var s = parseDt(tglAwal);
-			var e = parseDt(tglAkhir);
-			if (!s || !e || e <= s) {
-				alert('Rentang tanggal tidak valid: ' + tglAwal + ' s/d ' + tglAkhir);
+			if (typeof XLSX === 'undefined') {
+				alert('Library Excel belum siap. Coba refresh halaman.');
 				return;
 			}
 
-			var chunks = buildChunks(s, e);
-			console.log('[DownloadExcel] chunks=', chunks.length);
-			showModal();
-			setProgress(0, chunks.length, 'Memulai pengambilan data dalam ' + chunks.length + ' bagian...');
+			var data = window.DATAPOS_DATA || [];
+			var parameter = window.DATAPOS_PARAMETER || [];
+			if (!data.length || !parameter.length) {
+				alert('Tidak ada data untuk diunduh.');
+				return;
+			}
 
-			var allData = [];
-			var i = 0;
-			function next(){
-				if (i >= chunks.length) {
-					setProgress(chunks.length, chunks.length, 'Menyiapkan file Excel...');
-					document.getElementById('exportData').value = JSON.stringify(allData);
+			var tglAwal = btn.dataset.tglAwal;
+			var tglAkhir = btn.dataset.tglAkhir;
+			var judul = btn.dataset.judul || 'Data Pos';
+			var sAwal = parseDt(tglAwal);
+			var sAkhir = parseDt(tglAkhir);
+			var totalDays = (sAwal && sAkhir) ? diffDays(sAwal, sAkhir) : 1;
+			var chunkDays = calcChunkSize(totalDays);
+
+			// Split data berdasarkan chunk hari
+			var groups = sAwal ? splitDataByDateRange(data, sAwal, chunkDays) : [data];
+			if (groups.length === 0) groups = [data];
+			console.log('[DownloadExcel] totalDays=', totalDays, 'chunkDays=', chunkDays, 'groups=', groups.length);
+
+			showModal();
+			setProgress(0, groups.length, 'Memulai pengolahan data dalam ' + groups.length + ' bagian...');
+
+			// Bangun header row
+			var header = ['Waktu'];
+			for (var p = 0; p < parameter.length; p++) {
+				header.push(String(parameter[p].nama_parameter).replace(/_/g, ' ') + ' (' + parameter[p].satuan + ')');
+			}
+
+			var aoa = [[judul], header];
+			var idx = 0;
+
+			function processNext(){
+				if (idx >= groups.length) {
+					setProgress(groups.length, groups.length, 'Membuat file Excel...');
 					setTimeout(function(){
-						document.getElementById('formExportExcel').submit();
-						setTimeout(hideModal, 1500);
-					}, 300);
+						try {
+							var ws = XLSX.utils.aoa_to_sheet(aoa);
+							// Merge cells untuk title row (A1 sampai kolom terakhir)
+							var lastCol = header.length - 1;
+							ws['!merges'] = [{ s: { r:0, c:0 }, e: { r:0, c:lastCol } }];
+							// Set column widths
+							ws['!cols'] = header.map(function(){ return { wch: 18 }; });
+							var wb = XLSX.utils.book_new();
+							XLSX.utils.book_append_sheet(wb, ws, 'Data');
+							XLSX.writeFile(wb, sanitizeFilename(judul) + '.xlsx');
+							setProgress(groups.length, groups.length, 'Selesai. File akan diunduh.');
+							setTimeout(hideModal, 800);
+						} catch (err) {
+							console.error(err);
+							label.textContent = 'Gagal membuat Excel: ' + err.message;
+							showFooter();
+						}
+					}, 100);
 					return;
 				}
-				var c = chunks[i];
-				setProgress(i, chunks.length, 'Mengambil bagian ' + (i+1) + ' dari ' + chunks.length + ' (' + fmtDt(c.a) + ' s/d ' + fmtDt(c.b) + ')');
-				fetchChunk(idLogger, sesi, c.a, c.b)
-					.then(function(resp){
-						if (resp && resp.data && resp.data.length) {
-							allData = allData.concat(resp.data);
+				var group = groups[idx];
+				setProgress(idx, groups.length, 'Mengolah bagian ' + (idx+1) + ' dari ' + groups.length + ' (' + group.length + ' baris)');
+				// Tambahkan rows dari group ke AOA
+				for (var r = 0; r < group.length; r++) {
+					var row = group[r];
+					var rowArr = [row.waktu];
+					for (var p = 0; p < parameter.length; p++) {
+						var key = parameter[p].nama_parameter;
+						var val = row[key];
+						if (val === null || val === undefined || val === '') {
+							rowArr.push('');
+						} else {
+							var n = Number(val);
+							rowArr.push(isNaN(n) ? val : Number(n.toFixed(2)));
 						}
-						i++;
-						next();
-					})
-					.catch(function(err){
-						label.textContent = 'Gagal pada bagian ' + (i+1) + ': ' + err.message;
-						showFooter();
-					});
+					}
+					aoa.push(rowArr);
+				}
+				idx++;
+				// Delay kecil agar progress bar terlihat update
+				setTimeout(processNext, 50);
 			}
-			next();
+			processNext();
 		});
 	}
 
