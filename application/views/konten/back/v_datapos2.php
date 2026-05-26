@@ -83,21 +83,28 @@
 	</div>
 </div>
 
-<!-- Modal Progress -->
-<div class="modal fade" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
-	<div class="modal-dialog modal-sm modal-dialog-centered">
-		<div class="modal-content">
-			<div class="modal-body px-3 py-3">
-				<div class="mb-2 text-center">
-					<span class="badge bg-blue-lt me-2">Status: <span id="statusText">idle</span></span>
-				</div>
-				<div class="progress mt-3" role="progressbar" aria-label="Progress" style="height:30px">
-					<div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%">0%</div>
-				</div>
-			</div>
+<!-- Modal Progress (inline-style, tidak bergantung pada Bootstrap JS) -->
+<div id="__bbwsso_backdrop" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:99998;backdrop-filter:blur(2px);"></div>
+<div id="exampleModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:99999;width:92%;max-width:520px;font-family:inherit;overflow:hidden;">
+	<div style="padding:20px 24px;border-bottom:1px solid #e9ecef;background:#f8fafc;">
+		<h4 style="margin:0;font-size:1.05rem;font-weight:600;color:#0f172a;display:flex;align-items:center;gap:8px;">
+			<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2fb344;animation:pulse 1.5s infinite;"></span>
+			Memuat Data
+		</h4>
+	</div>
+	<div style="padding:22px 24px;">
+		<div style="font-size:0.95rem;color:#334155;margin-bottom:14px;line-height:1.5;" id="statusText">Memulai...</div>
+		<div style="background:#e2e8f0;border-radius:8px;overflow:hidden;height:26px;">
+			<div id="progressBar" style="background:linear-gradient(90deg,#2fb344,#48c75e);color:#fff;height:100%;width:0%;text-align:center;line-height:26px;font-size:0.9rem;font-weight:600;transition:width 0.3s ease;letter-spacing:0.5px;">0%</div>
 		</div>
 	</div>
 </div>
+<style>
+@keyframes pulse {
+	0%, 100% { opacity:1; transform:scale(1); }
+	50% { opacity:0.4; transform:scale(1.4); }
+}
+</style>
 
 <script>
 	$(function () {
@@ -131,37 +138,15 @@
 		function setStatus(msg) { $status.text(msg); }
 		function setPct(pct) { $bar.css('width', pct + '%').text(Math.round(pct) + '%'); }
 
+		var modalEl = $modal[0];
+		var backdropEl = document.getElementById('__bbwsso_backdrop');
 		function showModal() {
-			try {
-				if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
-					bootstrap.Modal.getOrCreateInstance($modal[0]).show();
-					return;
-				}
-			} catch (e) {}
-			$modal[0].classList.add('show');
-			$modal[0].style.display = 'block';
-			$modal[0].removeAttribute('aria-hidden');
-			document.body.classList.add('modal-open');
-			if (!document.getElementById('__bbwsso_backdrop')) {
-				var bd = document.createElement('div');
-				bd.id = '__bbwsso_backdrop';
-				bd.className = 'modal-backdrop fade show';
-				document.body.appendChild(bd);
-			}
+			if (backdropEl) backdropEl.style.display = 'block';
+			modalEl.style.display = 'block';
 		}
 		function hideModal() {
-			try {
-				if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
-					bootstrap.Modal.getOrCreateInstance($modal[0]).hide();
-					return;
-				}
-			} catch (e) {}
-			$modal[0].classList.remove('show');
-			$modal[0].style.display = 'none';
-			$modal[0].setAttribute('aria-hidden', 'true');
-			document.body.classList.remove('modal-open');
-			var bd = document.getElementById('__bbwsso_backdrop');
-			if (bd) bd.parentNode.removeChild(bd);
+			if (backdropEl) backdropEl.style.display = 'none';
+			modalEl.style.display = 'none';
 		}
 
 		// === Generate chunks (per minggu kalau >30hr, per 3hr kalau >3hr, 1 chunk kalau ≤3hr) ===
