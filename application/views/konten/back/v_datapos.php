@@ -61,11 +61,15 @@
 							<?php $judul = "Data ".$nama_lokasi. " pada ".  $this->session->userdata('data_tglawal') . " sampai ". $this->session->userdata('data_tglakhir') ?>
 							
 							<!--<input type="button" class="btn btn-success w-100"  onclick="tableToExcel('tabel', 'name', '<?= $judul ?>.xls')" value="Download" /> -->
-							<form action="<?= base_url() ?>datapos/export_excel" method="post" enctype="multipart/formdata"> 
-								<input type="text" name="title" value="<?= $judul?>"  class="d-none"/>
-								<input type="text" name="parameter" value="<?= htmlspecialchars(json_encode($parameter->result_array())) ?>"  class="d-none"/>
-								<input type="text" value="<?= htmlspecialchars(json_encode($datapos->result_array())) ?>" name="data" class="d-none"/>
-								<input type="submit" class="btn btn-success w-100" value="Download">
+							<form id="formExportExcel" action="<?= base_url() ?>datapos/export_excel" method="post" enctype="multipart/formdata">
+								<input type="hidden" name="title" value="<?= $judul?>"/>
+								<input type="hidden" name="parameter" id="exportParameter" value="<?= htmlspecialchars(json_encode($parameter->result_array())) ?>"/>
+								<input type="hidden" name="data" id="exportData" value=""/>
+								<button type="button" id="btnDownloadExcel" class="btn btn-success w-100"
+									data-tgl-awal="<?= $this->session->userdata('data_tglawal') ?>"
+									data-tgl-akhir="<?= $this->session->userdata('data_tglakhir') ?>"
+									data-id-logger="<?= $this->session->userdata('data_idlogger') ?>"
+									data-sesi="<?= $this->session->userdata('sesi_data') ?: 'hari' ?>">Download</button>
 							</form>
 							<?php } ?>
 						</div>
@@ -152,4 +156,164 @@
 		}));
 	});
 	// @formatter:on
+</script>
+
+<!-- Modal Progress Download -->
+<div class="modal modal-blur fade" id="downloadProgressModal" tabindex="-1" role="dialog" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+	<div class="modal-dialog modal-dialog-centered" role="document">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title">Memproses Download Data</h5>
+			</div>
+			<div class="modal-body">
+				<div class="mb-2" id="downloadProgressLabel">Mempersiapkan...</div>
+				<div class="progress mb-2" style="height:20px">
+					<div class="progress-bar progress-bar-striped progress-bar-animated bg-success" id="downloadProgressBar" role="progressbar" style="width: 0%" aria-valuemin="0" aria-valuemax="100">0%</div>
+				</div>
+				<div class="small text-muted" id="downloadProgressDetail">0 dari 0 bagian</div>
+			</div>
+			<div class="modal-footer d-none" id="downloadProgressFooter">
+				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="downloadProgressClose">Tutup</button>
+			</div>
+		</div>
+	</div>
+</div>
+
+<script>
+(function(){
+	var btn = document.getElementById('btnDownloadExcel');
+	if (!btn) return;
+
+	var modalEl = document.getElementById('downloadProgressModal');
+	var modal = (typeof bootstrap !== 'undefined' && bootstrap.Modal) ? new bootstrap.Modal(modalEl) : null;
+	var bar = document.getElementById('downloadProgressBar');
+	var label = document.getElementById('downloadProgressLabel');
+	var detail = document.getElementById('downloadProgressDetail');
+	var footer = document.getElementById('downloadProgressFooter');
+
+	function showModal(){ footer.classList.add('d-none'); if (modal) modal.show(); else modalEl.style.display = 'block'; }
+	function hideModal(){ if (modal) modal.hide(); else modalEl.style.display = 'none'; }
+	function showFooter(){ footer.classList.remove('d-none'); }
+	function setProgress(done, total, text){
+		var pct = total ? Math.round((done/total)*100) : 0;
+		bar.style.width = pct + '%';
+		bar.textContent = pct + '%';
+		bar.setAttribute('aria-valuenow', pct);
+		detail.textContent = done + ' dari ' + total + ' bagian';
+		if (text) label.textContent = text;
+	}
+
+	function parseDt(s){
+		if (!s) return null;
+		var parts = s.trim().split(/[\s\-:]/);
+		var y = parseInt(parts[0],10), mo = parseInt(parts[1],10)-1, d = parseInt(parts[2],10);
+		var h = parts[3] ? parseInt(parts[3],10) : 0;
+		var mi = parts[4] ? parseInt(parts[4],10) : 0;
+		return new Date(y, mo, d, h, mi, 0);
+	}
+	function pad(n){ return n<10 ? '0'+n : ''+n; }
+	function fmtDt(dt){
+		return dt.getFullYear()+'-'+pad(dt.getMonth()+1)+'-'+pad(dt.getDate())+' '+pad(dt.getHours())+':'+pad(dt.getMinutes());
+	}
+	function diffDays(a,b){
+		return Math.ceil((b.getTime()-a.getTime()) / (1000*60*60*24));
+	}
+
+	function buildChunks(start, end){
+		var totalDays = diffDays(start, end);
+		var chunkDays;
+		if (totalDays > 30) chunkDays = 7;
+		else if (totalDays > 3) chunkDays = 3;
+		else return [{ a: start, b: end }];
+
+		var chunks = [];
+		var cur = new Date(start.getTime());
+		while (cur < end) {
+			var lastDay = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + chunkDays - 1, 23, 59, 59);
+			if (lastDay >= end) lastDay = new Date(end.getTime());
+			chunks.push({ a: new Date(cur.getTime()), b: lastDay });
+			cur = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() + 1, 0, 0, 0);
+		}
+		return chunks;
+	}
+
+	function fetchChunk(idLogger, sesi, a, b){
+		var fd = new FormData();
+		fd.append('id_logger', idLogger);
+		fd.append('sesi', sesi);
+		fd.append('tgl_awal', fmtDt(a));
+		fd.append('tgl_akhir', fmtDt(b));
+		return fetch('<?= base_url() ?>datapos/chunk_data', { method:'POST', body: fd, credentials:'same-origin' })
+			.then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+	}
+
+	btn.addEventListener('click', function(){
+		var tglAwal = btn.dataset.tglAwal;
+		var tglAkhir = btn.dataset.tglAkhir;
+		var idLogger = btn.dataset.idLogger;
+		var sesi = btn.dataset.sesi || 'hari';
+
+		var start = parseDt(tglAwal);
+		var end = parseDt(tglAkhir);
+		if (!start || !end || end <= start) {
+			alert('Rentang tanggal tidak valid');
+			return;
+		}
+
+		var chunks = buildChunks(start, end);
+		if (chunks.length <= 1) {
+			var existingData = document.getElementById('exportData');
+			showModal();
+			setProgress(0, 1, 'Mengambil data...');
+			fetchChunk(idLogger, sesi, start, end)
+				.then(function(resp){
+					setProgress(1, 1, 'Menyiapkan file Excel...');
+					var data = (resp && resp.data) ? resp.data : [];
+					existingData.value = JSON.stringify(data);
+					setTimeout(function(){
+						document.getElementById('formExportExcel').submit();
+						hideModal();
+					}, 300);
+				})
+				.catch(function(err){
+					label.textContent = 'Gagal mengambil data: ' + err.message;
+					showFooter();
+				});
+			return;
+		}
+
+		showModal();
+		setProgress(0, chunks.length, 'Memulai pengambilan data dalam ' + chunks.length + ' bagian...');
+
+		var allData = [];
+		var i = 0;
+		function next(){
+			if (i >= chunks.length) {
+				setProgress(chunks.length, chunks.length, 'Menyiapkan file Excel...');
+				var dataField = document.getElementById('exportData');
+				dataField.value = JSON.stringify(allData);
+				setTimeout(function(){
+					document.getElementById('formExportExcel').submit();
+					setTimeout(hideModal, 800);
+				}, 300);
+				return;
+			}
+			var c = chunks[i];
+			setProgress(i, chunks.length, 'Mengambil bagian ' + (i+1) + ' dari ' + chunks.length + ' (' + fmtDt(c.a) + ' s/d ' + fmtDt(c.b) + ')');
+			fetchChunk(idLogger, sesi, c.a, c.b)
+				.then(function(resp){
+					if (resp && resp.data && resp.data.length) {
+						allData = allData.concat(resp.data);
+					}
+					i++;
+					next();
+				})
+				.catch(function(err){
+					label.textContent = 'Gagal pada bagian ' + (i+1) + ': ' + err.message;
+					showFooter();
+				});
+		}
+		next();
+	});
+})();
 </script>

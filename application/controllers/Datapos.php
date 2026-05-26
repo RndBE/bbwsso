@@ -510,6 +510,90 @@ class Datapos extends CI_Controller {
 		echo json_encode($data);
 	}
 
+	public function chunk_data()
+	{
+		header('Content-Type: application/json');
+
+		$idlogger = $this->input->post('id_logger') ?: $this->session->userdata('data_idlogger');
+		$tgl_awal = $this->input->post('tgl_awal');
+		$tgl_akhir = $this->input->post('tgl_akhir');
+		$sesi = $this->input->post('sesi') ?: ($this->session->userdata('sesi_data') ?: 'hari');
+
+		if (!$idlogger || !$tgl_awal || !$tgl_akhir) {
+			echo json_encode(['status' => 'error', 'message' => 'Parameter tidak lengkap', 'data' => []]);
+			return;
+		}
+
+		// Validate inputs: id_logger must be numeric, dates must match Y-m-d[ H:i] format
+		if (!preg_match('/^\d+$/', $idlogger)) {
+			echo json_encode(['status' => 'error', 'message' => 'id_logger tidak valid', 'data' => []]);
+			return;
+		}
+		if (!preg_match('/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/', $tgl_awal) ||
+			!preg_match('/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/', $tgl_akhir)) {
+			echo json_encode(['status' => 'error', 'message' => 'Format tanggal tidak valid', 'data' => []]);
+			return;
+		}
+		if (!in_array($sesi, ['hari', 'bulan', 'tahun'], true)) {
+			$sesi = 'hari';
+		}
+
+		$tabel_row = $this->db->where('id_logger', $idlogger)->get('t_logger')->row();
+		if (!$tabel_row) {
+			echo json_encode(['status' => 'error', 'message' => 'Logger tidak ditemukan', 'data' => []]);
+			return;
+		}
+		$tabel = $tabel_row->tabel_main;
+
+		$query_parameter = $this->db->query("SELECT * FROM t_logger INNER JOIN parameter_sensor ON t_logger.id_logger = parameter_sensor.logger_id where parameter_sensor.logger_id = '" . $idlogger . "' order by cast(SUBSTRING(kolom_sensor,7) as unsigned)");
+
+		$select = "";
+		foreach ($query_parameter->result() as $parameter) {
+			if ($parameter->satuan == "mm") {
+				$select .= "sum(" . $parameter->kolom_sensor . ") as " . $parameter->nama_parameter . ",";
+			} else {
+				$select .= "avg(" . $parameter->kolom_sensor . ") as " . $parameter->nama_parameter . ",";
+			}
+		}
+		$select_fix = substr($select, 0, -1);
+
+		if ($sesi == 'hari') {
+			$group = 'HOUR(waktu),DAY(waktu),MONTH(waktu),YEAR(waktu)';
+		} else if ($sesi == 'bulan') {
+			$group = 'DAY(waktu),MONTH(waktu),YEAR(waktu)';
+		} else {
+			$group = 'MONTH(waktu),YEAR(waktu)';
+		}
+
+		$query_data = $this->db->query('select waktu,' . $select_fix . ' from ' . $tabel . ' use index(waktu) where code_logger = "' . $idlogger . '" and waktu >= "' . $tgl_awal . '" and waktu <= "' . $tgl_akhir . '" group by ' . $group . ' order by waktu asc ')->result_array();
+
+		foreach ($query_data as $k => $v) {
+			if (array_key_exists("Debit", $v) and $idlogger == '10063') {
+				$debit = $this->kalimeneng($v['Debit']);
+				if ($v['Debit'] < 0) {
+					$query_data[$k]['Debit'] = number_format(0, 2, '.', '');
+				} else {
+					$query_data[$k]['Debit'] = number_format($debit, 2, '.', '');
+				}
+			}
+			if (array_key_exists("Debit", $v) and $idlogger == '10249') {
+				$h = $v['Debit'];
+				$n2 = $v['Elevasi_Muka_Air'];
+				$query_data[$k]['Debit'] = number_format($this->linear_interpolation($n2 * 100) * $h, 2, '.', '');
+			}
+			if (array_key_exists("Luas_Penampang_Basah", $v)) {
+				$n2 = $v['Elevasi_Muka_Air'];
+				$query_data[$k]['Luas_Penampang_Basah'] = number_format($this->linear_interpolation($n2 * 100), 2, '.', '');
+			}
+		}
+
+		echo json_encode([
+			'status' => 'ok',
+			'count' => count($query_data),
+			'data' => $query_data,
+		]);
+	}
+
 	public function tes_ajax(){
 		echo json_encode($this->input->post('parameter'));
 	}
