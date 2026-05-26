@@ -581,8 +581,8 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 											<div class="font-weight-medium">
 												<div class="subheader">Akumulasi CH Harian <?= $tglPada ?></div>
 											</div>
-											<div class="h1 mb-0 me-2 mt-0"><?= $akumStr ?> mm</div>
-											<div class="h5 fw-bold text-secondary mb-0 me-2 mt-0">
+											<div class="h1 mb-0 me-2 mt-0"><span class="js-akum-value"><?= $akumStr ?></span> mm</div>
+											<div class="h5 fw-bold text-secondary mb-0 me-2 mt-0 js-akum-text">
 												<?= $txtAkum ?>
 											</div>
 										</div>
@@ -683,7 +683,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 													<?= $tglSampai ?>
 												</div>
 											</div>
-											<div class="h1 mb-0 me-2 mt-0"><?= $akumStr ?> mm</div>
+											<div class="h1 mb-0 me-2 mt-0"><span class="js-akum-value"><?= $akumStr ?></span> mm</div>
 										</div>
 									</div>
 								</div>
@@ -756,7 +756,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 														<th>Maksimal</th><?php } ?>
 												</tr>
 											</thead>
-											<tbody>
+											<tbody id="analisaTabelBody" data-satuan="<?= htmlspecialchars($satuan, ENT_QUOTES) ?>" data-typegraf="<?= htmlspecialchars($typegraf, ENT_QUOTES) ?>">
 												<?php foreach ($data_sensor->data_tabel as $dt): ?>
 													<tr>
 														<td><?= $dt->waktu ?></td>
@@ -1012,7 +1012,7 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 	document.addEventListener("DOMContentLoaded", function () { var el; window.TomSelect && (new TomSelect(el = document.getElementById('select-pos')), new TomSelect(el = document.getElementById('select-parameter'))) });
 	function ExportToExcel(type, fn, dl) { var elt = document.getElementById('tbl_exporttable_to_xls'); var wb = XLSX.utils.table_to_book(elt, { sheet: "sheet1" }); return dl ? XLSX.write(wb, { bookType: type, bookSST: true, type: 'base64' }) : XLSX.writeFile(wb, fn || ('<?= $namafile ?>.' + (type || 'xlsx'))) }
 	function validate_form() { var v = $('#select-pos').val(); if (v != '') { $('#form-pos').submit() } }
-	Highcharts.chart('analisa', {
+	window.analisaChart = Highcharts.chart('analisa', {
 		chart: {
 			<?php if ($idLogger == '10249' and $data_sensor->namaSensor == 'Rerata_Elevasi_Muka_Air') { ?>
 																											events: {
@@ -1120,3 +1120,208 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 				responsive: { rules: [{ condition: { maxWidth: 500 }, chartOptions: { legend: { layout: 'horizontal', align: 'center', verticalAlign: 'bottom' } } }] }
 	});
 </script>
+
+<?php if (!empty($needs_chunking) && !empty($chunks_plan)): ?>
+<!-- =================== AJAX CHUNKING (server-side disabled, data loaded via fetch) =================== -->
+<div id="__bbwsso_backdrop" style="display:block;position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:99998;backdrop-filter:blur(2px);"></div>
+<div id="analisaProgressModal" style="display:block;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:99999;width:92%;max-width:540px;font-family:inherit;overflow:hidden;">
+	<div style="padding:18px 24px;border-bottom:1px solid #e9ecef;background:#f8fafc;">
+		<h4 style="margin:0;font-size:1.05rem;font-weight:600;color:#0f172a;display:flex;align-items:center;gap:8px;">
+			<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#2fb344;animation:pulse 1.5s infinite;"></span>
+			Memuat Data Analisa
+		</h4>
+	</div>
+	<div style="padding:22px 24px;">
+		<div style="font-size:0.95rem;color:#334155;margin-bottom:14px;line-height:1.5;" id="analisaProgressLabel">Memulai pengambilan data dalam <?= count($chunks_plan) ?> bagian...</div>
+		<div style="background:#e2e8f0;border-radius:8px;overflow:hidden;height:26px;">
+			<div id="analisaProgressBar" style="background:linear-gradient(90deg,#2fb344,#48c75e);color:#fff;height:100%;width:0%;text-align:center;line-height:26px;font-size:0.9rem;font-weight:600;transition:width 0.3s ease;letter-spacing:0.5px;">0%</div>
+		</div>
+		<div id="analisaProgressDetail" style="font-size:0.82rem;color:#64748b;margin-top:10px;"></div>
+	</div>
+	<div id="analisaProgressFooter" style="display:none;padding:12px 24px;border-top:1px solid #e9ecef;text-align:right;background:#f8fafc;">
+		<button type="button" id="analisaProgressClose" style="padding:8px 16px;background:#6c757d;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:500;">Tutup</button>
+		<button type="button" id="analisaProgressRetry" style="margin-left:8px;padding:8px 16px;background:#2fb344;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:500;display:none;">Coba Lagi</button>
+	</div>
+</div>
+<style>
+@keyframes pulse {
+	0%, 100% { opacity:1; transform:scale(1); }
+	50% { opacity:0.4; transform:scale(1.4); }
+}
+</style>
+<script>
+(function () {
+	var CHUNK_URL = '<?= site_url('analisa/data_chunk') ?>';
+	var TOKEN     = <?= json_encode($token) ?>;
+	var CHUNKS    = <?= json_encode($chunks_plan) ?>;
+	var TYPEGRAF  = <?= json_encode($typegraf) ?>;
+
+	var backdrop = document.getElementById('__bbwsso_backdrop');
+	var modal    = document.getElementById('analisaProgressModal');
+	var bar      = document.getElementById('analisaProgressBar');
+	var label    = document.getElementById('analisaProgressLabel');
+	var detail   = document.getElementById('analisaProgressDetail');
+	var footer   = document.getElementById('analisaProgressFooter');
+	var closeBtn = document.getElementById('analisaProgressClose');
+	var retryBtn = document.getElementById('analisaProgressRetry');
+
+	function hideModal() { backdrop.style.display = 'none'; modal.style.display = 'none'; }
+	function showFooter(retry) {
+		footer.style.display = 'block';
+		retryBtn.style.display = retry ? 'inline-block' : 'none';
+	}
+	function setProgress(done, total, txt) {
+		var pct = total ? Math.round((done / total) * 100) : 0;
+		bar.style.width = pct + '%';
+		bar.textContent = pct + '%';
+		if (txt) label.textContent = txt;
+		detail.textContent = done + ' dari ' + total + ' bagian (' + (total - done) + ' tersisa)';
+	}
+	closeBtn.addEventListener('click', hideModal);
+
+	// Fetch dengan retry & timeout
+	function fetchChunk(chunk, attempt) {
+		attempt = attempt || 1;
+		var url = CHUNK_URL;
+		var fd = new FormData();
+		fd.append('token', TOKEN);
+		fd.append('start', chunk.start);
+		fd.append('end', chunk.end);
+
+		// AbortController untuk timeout 90s per chunk
+		var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+		var timeoutId = ctrl ? setTimeout(function () { ctrl.abort(); }, 90000) : null;
+
+		return fetch(url, { method: 'POST', body: fd, credentials: 'same-origin', signal: ctrl ? ctrl.signal : undefined })
+			.then(function (r) {
+				if (timeoutId) clearTimeout(timeoutId);
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				return r.json();
+			})
+			.then(function (json) {
+				if (json.status !== 'ok') throw new Error(json.message || 'Server error');
+				return json;
+			})
+			.catch(function (err) {
+				if (timeoutId) clearTimeout(timeoutId);
+				if (attempt < 2) {
+					console.warn('[chunk] retry attempt 2 setelah error:', err.message);
+					return new Promise(function (res) { setTimeout(res, 800); })
+						.then(function () { return fetchChunk(chunk, attempt + 1); });
+				}
+				throw err;
+			});
+	}
+
+	// Klasifikasi intensitas hujan (mirror dari PHP)
+	function classifyHujan(akumRaw) {
+		if (akumRaw <= 0)        return { text: 'Tidak Hujan',         color: '#6c757d' };
+		if (akumRaw < 5)         return { text: 'Hujan Ringan',        color: '#0d6efd' };
+		if (akumRaw < 20)        return { text: 'Hujan Sedang',        color: '#198754' };
+		if (akumRaw < 50)        return { text: 'Hujan Lebat',         color: '#fd7e14' };
+		if (akumRaw < 100)       return { text: 'Hujan Sangat Lebat',  color: '#dc3545' };
+		return                          { text: 'Hujan Ekstrem',       color: '#6f42c1' };
+	}
+
+	function buildTableHtml(rows, typegraf, satuan) {
+		if (!rows.length) return '';
+		var out = [];
+		for (var i = 0; i < rows.length; i++) {
+			var r = rows[i];
+			var html = '<tr><td>' + r.waktu + '</td><td>' + r.dta + ' ' + satuan + '</td>';
+			if (typegraf !== 'column') {
+				html += '<td>' + r.min + ' ' + satuan + '</td><td>' + r.max + ' ' + satuan + '</td>';
+			}
+			html += '</tr>';
+			out.push(html);
+		}
+		return out.join('');
+	}
+
+	function populate(allData, allRange, allTableRows, totalAkum) {
+		// Update chart series via Highcharts API
+		try {
+			var chart = window.analisaChart;
+			if (chart && chart.series && chart.series.length) {
+				chart.series[0].setData(allData, false);
+				if (chart.series[1] && allRange.length) chart.series[1].setData(allRange, false);
+				chart.redraw();
+			}
+		} catch (e) {
+			console.error('[chart] update gagal:', e);
+		}
+
+		// Update tabel
+		var tbody = document.getElementById('analisaTabelBody');
+		if (tbody) {
+			var satuan = tbody.getAttribute('data-satuan') || '';
+			var typegraf = tbody.getAttribute('data-typegraf') || '';
+			tbody.innerHTML = buildTableHtml(allTableRows, typegraf, satuan);
+		}
+
+		// Update akumulasi (hanya bermakna saat typegraf=column)
+		if (TYPEGRAF === 'column') {
+			var akumStr = totalAkum.toFixed(1);
+			document.querySelectorAll('.js-akum-value').forEach(function (el) { el.textContent = akumStr; });
+			var cls = classifyHujan(totalAkum);
+			document.querySelectorAll('.js-akum-text').forEach(function (el) {
+				el.textContent = cls.text;
+				el.style.color = cls.color;
+			});
+		}
+	}
+
+	// Sequential fetch dengan retry
+	var allData = [], allRange = [], allTable = [], totalAkum = 0;
+	var idx = 0;
+	function next() {
+		if (idx >= CHUNKS.length) {
+			setProgress(CHUNKS.length, CHUNKS.length, 'Selesai — merender chart & tabel...');
+			setTimeout(function () {
+				populate(allData, allRange, allTable, totalAkum);
+				setTimeout(hideModal, 400);
+			}, 200);
+			return;
+		}
+		var c = CHUNKS[idx];
+		setProgress(idx, CHUNKS.length, 'Mengambil bagian ' + (idx + 1) + ' dari ' + CHUNKS.length);
+		detail.textContent = c.start + ' s/d ' + c.end;
+
+		fetchChunk(c)
+			.then(function (json) {
+				if (Array.isArray(json.data))       allData = allData.concat(json.data);
+				if (Array.isArray(json.range))      allRange = allRange.concat(json.range);
+				if (Array.isArray(json.data_tabel)) allTable = allTable.concat(json.data_tabel);
+				totalAkum += Number(json.akumulasi) || 0;
+				idx++;
+				next();
+			})
+			.catch(function (err) {
+				console.error('[chunk ' + (idx + 1) + '] gagal final:', err);
+				label.textContent = 'Gagal pada bagian ' + (idx + 1) + ' dari ' + CHUNKS.length;
+				detail.textContent = 'Error: ' + err.message + ' (' + c.start + ' s/d ' + c.end + ')';
+				showFooter(true);
+			});
+	}
+
+	retryBtn.addEventListener('click', function () {
+		footer.style.display = 'none';
+		next();
+	});
+
+	// Start setelah Highcharts ter-init (chart sudah ada di window.analisaChart)
+	function kickoff() {
+		if (typeof window.analisaChart === 'undefined') {
+			setTimeout(kickoff, 100);
+			return;
+		}
+		next();
+	}
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', kickoff);
+	} else {
+		kickoff();
+	}
+})();
+</script>
+<?php endif; ?>

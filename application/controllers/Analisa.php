@@ -528,6 +528,275 @@ class Analisa extends CI_Controller
 		redirect('analisa/data/' . $enc);
 	}
 
+	/**
+	 * Pecah rentang query jadi beberapa chunk supaya tidak satu-shot query super-berat.
+	 * Aturan:
+	 *   - mode 'tahun'  → chunk per bulan (12 chunk per tahun, masing-masing scan ±30 hari)
+	 *   - mode 'range' > 365 hari → per 30 hari
+	 *   - mode 'range' > 90 hari  → per 14 hari
+	 *   - mode 'range' > 30 hari  → per 7 hari
+	 *   - selain itu → 1 chunk (tanpa pecah)
+	 */
+	private function _build_analisa_chunks($start, $end, $modeData)
+	{
+		$startTs = strtotime($start);
+		$endTs   = strtotime($end);
+		if ($startTs === false || $endTs === false || $startTs >= $endTs) {
+			return [['start' => $start, 'end' => $end]];
+		}
+
+		if ($modeData === 'tahun') {
+			$chunks = [];
+			$cur = $startTs;
+			while ($cur <= $endTs) {
+				$monthLast = mktime(23, 59, 59, (int) date('n', $cur), (int) date('t', $cur), (int) date('Y', $cur));
+				if ($monthLast > $endTs) $monthLast = $endTs;
+				$chunks[] = [
+					'start' => date('Y-m-d H:i:s', $cur),
+					'end'   => date('Y-m-d H:i:s', $monthLast),
+				];
+				$cur = $monthLast + 1;
+			}
+			return $chunks;
+		}
+
+		if ($modeData === 'range') {
+			$totalDays = ($endTs - $startTs) / 86400;
+			if ($totalDays <= 30) {
+				return [['start' => $start, 'end' => $end]];
+			}
+			$chunkDays = $totalDays > 365 ? 30 : ($totalDays > 90 ? 14 : 7);
+			$chunks = [];
+			$cur = $startTs;
+			while ($cur <= $endTs) {
+				$chunkEnd = $cur + ($chunkDays * 86400) - 1;
+				if ($chunkEnd > $endTs) $chunkEnd = $endTs;
+				$chunks[] = [
+					'start' => date('Y-m-d H:i:s', $cur),
+					'end'   => date('Y-m-d H:i:s', $chunkEnd),
+				];
+				$cur = $chunkEnd + 1;
+			}
+			return $chunks;
+		}
+
+		return [['start' => $start, 'end' => $end]];
+	}
+
+	/**
+	 * Bangun konfigurasi SELECT/GROUP/ORDER & start/end untuk mode tertentu.
+	 * Return: ['select','group','order','start','end']
+	 */
+	private function _build_analisa_sql_parts($modeData, $kolom, $selectAgg, $pada, $dari, $sampai)
+	{
+		if ($modeData === 'hari') {
+			return [
+				'select' => "avg(sensor2) as tma,max(sensor2) as tma_max,min(sensor2) as tma_min,AVG(sensor1 - sensor2) AS avg_diff, MIN(sensor1 - sensor2) AS min_diff, MAX(sensor1 - sensor2) AS max_diff, waktu, HOUR(waktu) AS jam, DAY(waktu) AS hari, MONTH(waktu) AS bulan, YEAR(waktu) AS tahun, $selectAgg, MIN($kolom) AS min, MAX($kolom) AS max",
+				'group'  => "YEAR(waktu), MONTH(waktu), DAY(waktu), HOUR(waktu)",
+				'order'  => "tahun ASC, bulan ASC, hari ASC, jam ASC",
+				'start'  => $pada . ' 00:00:00',
+				'end'    => $pada . ' 23:59:59',
+			];
+		} elseif ($modeData === 'bulan') {
+			return [
+				'select' => "avg(sensor2) as tma,max(sensor2) as tma_max,min(sensor2) as tma_min,AVG(sensor1 - sensor2) AS avg_diff, MIN(sensor1 - sensor2) AS min_diff, MAX(sensor1 - sensor2) AS max_diff, waktu, DATE(waktu) AS tanggal, DAY(waktu) AS hari, MONTH(waktu) AS bulan, YEAR(waktu) AS tahun, $selectAgg, MIN($kolom) AS min, MAX($kolom) AS max",
+				'group'  => "YEAR(waktu), MONTH(waktu), DAY(waktu)",
+				'order'  => "tahun ASC, bulan ASC, hari ASC",
+				'start'  => $pada . '-01 00:00:00',
+				'end'    => date('Y-m-t 23:59:59', strtotime($pada . '-01')),
+			];
+		} elseif ($modeData === 'tahun') {
+			return [
+				'select' => "avg(sensor2) as tma,max(sensor2) as tma_max,min(sensor2) as tma_min,AVG(sensor1 - sensor2) AS avg_diff, MIN(sensor1 - sensor2) AS min_diff, MAX(sensor1 - sensor2) AS max_diff, DATE(waktu) AS tanggal, MONTH(waktu) AS bulan, YEAR(waktu) AS tahun, $selectAgg, MIN($kolom) AS min, MAX($kolom) AS max",
+				'group'  => "YEAR(waktu), MONTH(waktu)",
+				'order'  => "tahun ASC, bulan ASC",
+				'start'  => $pada . '-01-01 00:00:00',
+				'end'    => $pada . '-12-31 23:59:59',
+			];
+		}
+		// range
+		return [
+			'select' => "avg(sensor2) as tma,max(sensor2) as tma_max,min(sensor2) as tma_min,AVG(sensor1 - sensor2) AS avg_diff, MIN(sensor1 - sensor2) AS min_diff, MAX(sensor1 - sensor2) AS max_diff, waktu, DATE(waktu) AS tanggal, HOUR(waktu) AS jam, DAY(waktu) AS hari, MONTH(waktu) AS bulan, YEAR(waktu) AS tahun, $selectAgg, MIN($kolom) AS min, MAX($kolom) AS max",
+			'group'  => "YEAR(waktu), MONTH(waktu), DAY(waktu), HOUR(waktu)",
+			'order'  => "tahun ASC, bulan ASC, hari ASC, jam ASC",
+			'start'  => $dari,
+			'end'    => $sampai,
+		];
+	}
+
+	/**
+	 * Transformasi nilai row sesuai parameter & logger.
+	 * Return: [h, min_data, max_data] sudah ter-konversi.
+	 */
+	private function _transform_analisa_row($r, $namaParameter, $idLogger, $nama_sensor)
+	{
+		$h = $r->$nama_sensor;
+		$min_data = $r->min;
+		$max_data = $r->max;
+
+		if ($namaParameter === 'Debit' && $idLogger === '10063') {
+			if ($h < 0 || $min_data < 0 || $max_data < 0) {
+				$h = max(0, $h);
+				$min_data = max(0, $min_data);
+				$max_data = max(0, $max_data);
+			} else {
+				$h = $this->kalimeneng($r->$nama_sensor);
+				$min_data = $this->kalimeneng($r->min);
+				$max_data = $this->kalimeneng($r->max);
+			}
+		} elseif ($namaParameter === 'Debit' && $idLogger !== '10249') {
+			$h = $this->nilai_debit_rating_curve($idLogger, $h, $h);
+			$min_data = $this->nilai_debit_rating_curve($idLogger, $min_data, $min_data);
+			$max_data = $this->nilai_debit_rating_curve($idLogger, $max_data, $max_data);
+		} elseif ($namaParameter === 'Debit_Aliran_Sungai') {
+			$h = $this->debit_interpolation(($r->avg_diff));
+			$min_data = $this->debit_interpolation(($r->min_diff));
+			$max_data = $this->debit_interpolation(($r->max_diff));
+		} elseif ($namaParameter === 'Debit' && $idLogger === '10249') {
+			$tma = $r->tma * 100;
+			$tma_min = $r->tma_min * 100;
+			$tma_max = $r->tma_max * 100;
+			$h = $this->linear_interpolation($tma) * $h;
+			$min_data = $this->linear_interpolation($tma_min) * $min_data;
+			$max_data = $this->linear_interpolation($tma_max) * $max_data;
+		} elseif ($namaParameter === 'Luas_Penampang_Basah' && $idLogger === '10249') {
+			$tma = $r->tma * 100;
+			$tma_min = $r->tma_min * 100;
+			$tma_max = $r->tma_max * 100;
+			$h = $this->linear_interpolation($tma);
+			$min_data = $this->linear_interpolation($tma_min);
+			$max_data = $this->linear_interpolation($tma_max);
+		}
+		return [(float) $h, (float) $min_data, (float) $max_data];
+	}
+
+	/**
+	 * Hitung epoch ms UTC untuk row sesuai mode.
+	 * Highcharts pakai milliseconds dari epoch UTC.
+	 */
+	private function _ts_for_row($r, $modeData)
+	{
+		if ($modeData === 'tahun') {
+			return gmmktime(0, 0, 0, (int) $r->bulan, 1, (int) $r->tahun) * 1000;
+		}
+		if ($modeData === 'bulan') {
+			return gmmktime(0, 0, 0, (int) $r->bulan, (int) $r->hari, (int) $r->tahun) * 1000;
+		}
+		// hari atau range (per jam)
+		return gmmktime((int) $r->jam, 0, 0, (int) $r->bulan, (int) $r->hari, (int) $r->tahun) * 1000;
+	}
+
+	/**
+	 * Label waktu untuk tabel berdasarkan mode.
+	 */
+	private function _waktu_label_for_row($r, $modeData)
+	{
+		if ($modeData === 'hari')  return date('H', strtotime($r->waktu)) . ':00:00';
+		if ($modeData === 'bulan') return date('Y-m-d', strtotime($r->waktu));
+		if ($modeData === 'tahun') return date('Y-m', strtotime($r->tanggal));
+		return date('Y-m-d H', strtotime($r->waktu)) . ':00:00';
+	}
+
+	/**
+	 * Endpoint AJAX: ambil 1 chunk data analisa.
+	 * Param POST: token, start, end
+	 * Return JSON: { status, data:[[ts,val],...], range:[[ts,min,max],...], data_tabel:[{waktu,dta,min,max},...], akumulasi:float }
+	 */
+	public function data_chunk()
+	{
+		@ini_set('memory_limit', '256M');
+		@set_time_limit(90);
+		header('Content-Type: application/json; charset=UTF-8');
+		header('Cache-Control: no-cache, no-store');
+
+		$token = $this->input->post('token') ?: $this->input->get('token');
+		$chunkStart = $this->input->post('start') ?: $this->input->get('start');
+		$chunkEnd   = $this->input->post('end')   ?: $this->input->get('end');
+
+		if (!$token || !$chunkStart || !$chunkEnd) {
+			echo json_encode(['status' => 'error', 'message' => 'Parameter tidak lengkap']);
+			return;
+		}
+
+		$dec = $this->decrypt_param($token);
+		if (!$dec) {
+			echo json_encode(['status' => 'error', 'message' => 'Token tidak valid']);
+			return;
+		}
+
+		$gabungan = isset($dec['idlogger']) ? explode('_', trim($dec['idlogger'])) : null;
+		$idLogger = $gabungan[0] ?? null;
+		$aset     = $gabungan[1] ?? null;
+		$idParam  = isset($dec['id_param']) ? trim($dec['id_param']) : null;
+		$modeData = isset($dec['data']) ? trim($dec['data']) : null;
+
+		if ($aset !== 'bbws') {
+			echo json_encode(['status' => 'error', 'message' => 'Chunk hanya didukung untuk aset BBWS']);
+			return;
+		}
+
+		$dataParam = $this->db->where('id_param', $idParam)->get('parameter_sensor')->row();
+		if (!$dataParam) {
+			echo json_encode(['status' => 'error', 'message' => 'Parameter tidak ditemukan']);
+			return;
+		}
+
+		$tipeGrafik    = $dataParam->tipe_graf;
+		$kolom         = $dataParam->kolom_sensor;
+		$namaParameter = $dataParam->nama_parameter;
+
+		$tb_main = $this->db->where('id_logger', $idLogger)->get('t_logger')->row();
+		if (!$tb_main) {
+			echo json_encode(['status' => 'error', 'message' => 'Logger tidak ditemukan']);
+			return;
+		}
+
+		$nama_sensor = ($tipeGrafik === 'column') ? ('Akumulasi_' . $namaParameter) : ('Rerata_' . $namaParameter);
+		$selectAgg   = ($tipeGrafik === 'column') ? "SUM($kolom) AS $nama_sensor" : "AVG($kolom) AS $nama_sensor";
+
+		$parts = $this->_build_analisa_sql_parts($modeData, $kolom, $selectAgg, $dec['pada'] ?? null, $dec['dari'] ?? null, $dec['sampai'] ?? null);
+
+		$sql = "SELECT {$parts['select']} FROM {$tb_main->tabel_main} WHERE code_logger=? AND waktu BETWEEN ? AND ? GROUP BY {$parts['group']} ORDER BY {$parts['order']}";
+
+		try {
+			$q = $this->db->query($sql, [$idLogger, $chunkStart, $chunkEnd]);
+		} catch (Exception $e) {
+			echo json_encode(['status' => 'error', 'message' => 'Query gagal: ' . $e->getMessage()]);
+			return;
+		}
+
+		$data = [];
+		$range = [];
+		$data_tabel = [];
+		$akumulasi = 0;
+
+		if ($q) {
+			foreach ($q->result() as $r) {
+				list($h, $min_data, $max_data) = $this->_transform_analisa_row($r, $namaParameter, $idLogger, $nama_sensor);
+				$ts = $this->_ts_for_row($r, $modeData);
+				if ($tipeGrafik === 'column') $akumulasi += $h;
+
+				$data[] = [$ts, round($h, 3)];
+				$range[] = [$ts, round($min_data, 3), round($max_data, 3)];
+				$data_tabel[] = [
+					'waktu' => $this->_waktu_label_for_row($r, $modeData),
+					'dta'   => number_format($h, 2, '.', ''),
+					'min'   => number_format($min_data, 2, '.', ''),
+					'max'   => number_format($max_data, 2, '.', ''),
+				];
+			}
+			$q->free_result();
+		}
+
+		echo json_encode([
+			'status'     => 'ok',
+			'data'       => $data,
+			'range'      => $range,
+			'data_tabel' => $data_tabel,
+			'akumulasi'  => $akumulasi,
+		]);
+	}
+
 	public function data($string)
 	{
 		$dec = $this->decrypt_param($string);
@@ -664,9 +933,30 @@ class Analisa extends CI_Controller
 			}
 
 			$sql = "SELECT $select FROM {$tb_main->tabel_main} WHERE code_logger=? AND waktu BETWEEN ? AND ? GROUP BY $group ORDER BY $order";
-			$q = $this->db->query($sql, [$idLogger, $start, $end]);
+
+			// Cek apakah perlu AJAX chunking di frontend (mode tahun / range panjang)
+			$chunks_plan = $this->_build_analisa_chunks($start, $end, $modeData);
+			$needs_chunking = (count($chunks_plan) > 1);
+
+			$rows_all = [];
 			$akumulasi_hujan = 0;
-			foreach ($q->result() as $r) {
+
+			if (!$needs_chunking) {
+				// Mode normal: query langsung (server-side render)
+				@ini_set('memory_limit', '512M');
+				@set_time_limit(60);
+				$q_chunk = $this->db->query($sql, [$idLogger, $start, $end]);
+				if ($q_chunk) {
+					foreach ($q_chunk->result() as $r_chunk) {
+						$rows_all[] = $r_chunk;
+					}
+					$q_chunk->free_result();
+				}
+			}
+			// kalau needs_chunking, $rows_all kosong → chart & tabel awalnya kosong
+			// JS akan fetch chunk dan populate via Highcharts.setData + DOM
+
+			foreach ($rows_all as $r) {
 				$h = $r->$nama_sensor;
 				$min_data = $r->min;
 				$max_data = $r->max;
@@ -799,6 +1089,10 @@ class Analisa extends CI_Controller
 		$payload['token'] = $string;
 		$payload['aset'] = $aset;
 		$payload['konten'] = 'konten/back/analisa_all';
+
+		// Info chunking untuk frontend AJAX (hanya aset bbws yang punya $chunks_plan)
+		$payload['needs_chunking'] = isset($needs_chunking) ? $needs_chunking : false;
+		$payload['chunks_plan']    = isset($chunks_plan) ? $chunks_plan : [];
 
 		$this->load->view('template_admin/site', $payload);
 	}
