@@ -3,141 +3,78 @@
 	<div class="page-header d-print-none">
 		<div class="row g-2 align-items-center">
 			<div class="col">
-				<h2 class="page-title">
-					<?php // echo ucfirst($this->uri->segment(1)) ?>
-					Data Pos
-				</h2>
+				<h2 class="page-title">Data Pos</h2>
 			</div>
 		</div>
 	</div>
 </div>
 <a id="dlink" style="display:none;"></a>
 <div class="page-body">
-	<!-- Konten-->
 	<div class="container-xl">
-		<div class="row row-cards hide-scrollbar px-0 " >
+		<div class="row row-cards hide-scrollbar px-0">
 			<div class="card">
 				<div class="card-body pt-2 px-3">
-					<div class="col-12 col-xl-8 row align-items-end">
-						<div class="col-12 col-md-3">
-							<div class="form-group">
-								<label class="form-label mt-2">Lokasi Pos</label>
-								<?php 
-								$this->load->helper('logger');
-								$cmblogger=loggercombo();
-								echo form_open('datapos/set_lokasi');
-								?>
-								<select type="text" name="id_logger" class="form-select" placeholder="Cari Lokasi Pos" onchange="this.form.submit()" id="select-pos" value="">
-									<option value="">Pilih Pos</option>
-									<?php foreach ($pilih_pos as $mnpos) : ?>
-									<option value="<?= $mnpos['id_logger'] .','.$mnpos['tabel'] ?>" <?= ($mnpos['id_logger'] == $this->session->userdata('data_idlogger')) ? 'selected' : '' ?>><?= str_replace('_', ' ',$mnpos['nama_lokasi']) ?></option>
-									<?php endforeach ?>
-								</select>
-								<?php 
-	echo form_close();
-								?>
-								<?php echo form_open('datapos/set_range'); ?>
+					<form id="fetchForm">
+						<div class="col-12 col-xl-10 row align-items-end">
+							<div class="col-12 col-md-3">
+								<div class="form-group">
+									<label class="form-label mt-2">Lokasi Pos</label>
+									<select name="id_logger" class="form-select" id="select-pos">
+										<option value="">Pilih Pos</option>
+										<?php foreach ($pilih_pos as $mnpos) : ?>
+											<option value="<?= $mnpos['id_logger'] ?>|<?= htmlspecialchars($mnpos['nama_lokasi'], ENT_QUOTES) ?>"
+												<?= ($mnpos['id_logger'] == $this->session->userdata('data_idlogger')) ? 'selected' : '' ?>>
+												<?= str_replace('_', ' ', $mnpos['nama_lokasi']) ?>
+											</option>
+										<?php endforeach ?>
+									</select>
+								</div>
+							</div>
+							<div class="col-12 col-md-3">
+								<div class="form-group">
+									<label class="form-label mt-2">Dari</label>
+									<input class="form-control" name="awal" id="awal_new" placeholder="Dari" autocomplete="off" required
+										value="<?= $this->session->userdata('data_tglawal') ? substr($this->session->userdata('data_tglawal'), 0, 10) : '' ?>"/>
+								</div>
+							</div>
+							<div class="col-12 col-md-3">
+								<div class="form-group">
+									<label class="form-label mt-2">Sampai</label>
+									<input class="form-control" name="akhir" id="akhir_new" placeholder="Sampai" autocomplete="off" required
+										value="<?= $this->session->userdata('data_tglakhir') ? substr($this->session->userdata('data_tglakhir'), 0, 10) : '' ?>"/>
+								</div>
+							</div>
+							<div class="col-12 col-md-2">
+								<div class="form-group">
+									<label class="form-label mt-2">Interval</label>
+									<select name="sesi" class="form-select" id="select-sesi">
+										<option value="hari" <?= ($this->session->userdata('sesi_data') == 'hari' || !$this->session->userdata('sesi_data')) ? 'selected' : '' ?>>Hari (per jam)</option>
+										<option value="bulan" <?= ($this->session->userdata('sesi_data') == 'bulan') ? 'selected' : '' ?>>Bulan (per hari)</option>
+										<option value="tahun" <?= ($this->session->userdata('sesi_data') == 'tahun') ? 'selected' : '' ?>>Tahun (per bulan)</option>
+									</select>
+								</div>
+							</div>
+							<div class="col-6 col-md-auto d-flex align-items-end mt-3 mt-md-0">
+								<button type="submit" class="btn btn-primary" id="btnTampil">Tampil</button>
+							</div>
+							<div class="col-6 col-md-auto d-flex align-items-end mt-3 mt-md-0">
+								<button type="button" id="btn-export" class="btn btn-success w-100" disabled>
+									Download
+									<span class="spinner-border spinner-border-sm ms-2" style="display:none" role="status"></span>
+								</button>
 							</div>
 						</div>
-						<div class="col-12 col-md-3">
-							<div class="form-group">
-								<label class="form-label mt-2">Dari</label>
-								<input class="form-control" name="dari" placeholder="Dari" id="dpdari" value="<?= $this->session->userdata('data_tglawal') ?>" autocomplete="off" required/>
-							</div>
-						</div>
-						<div class="col-12 col-md-3">
-							<div class="form-group">
-								<label class="form-label mt-2">Sampai</label>
-								<input class="form-control" name="sampai" placeholder="Sampai" id="dpsampai" value="<?= $this->session->userdata('data_tglakhir') ?>" autocomplete="off" required/>
-							</div>
-						</div>
-						<div class="col-6 col-md-auto d-flex align-items-end mt-3 mt-md-0">
-							
-							<input type="submit" class="btn btn-primary" value="Tampil">
-								
-						</div>
-						<?php echo form_close() ?>
-						<div class="col-6 col-md-auto d-flex align-items-end mt-3 mt-md-0">
-							<?php
-	if($datapos != "kosong"){ ?>
-							<?php $judul = "Data ".$nama_lokasi. " pada ".  $this->session->userdata('data_tglawal') . " sampai ". $this->session->userdata('data_tglakhir') ?>
-
-							<button type="button" id="btnDownloadExcel" class="btn btn-success w-100"
-								data-tgl-awal="<?= $this->session->userdata('data_tglawal') ?>"
-								data-tgl-akhir="<?= $this->session->userdata('data_tglakhir') ?>"
-								data-judul="<?= htmlspecialchars($judul, ENT_QUOTES) ?>">Download</button>
-							<?php } ?>
-						</div>
-
-					</div>
+					</form>
 				</div>
 			</div>
-			<?php	echo form_close();?>
-			<div class="card <?= ($datapos == "kosong") ? '' : 'd-none' ?>">
-				<div class="card-body">
-					<h3>Data Tidak Ditemukan</h3>
-				</div>
-			</div>
-			<div class="card <?= ($datapos != "kosong") ? '' : 'd-none' ?>" id="data_fetch">
-				<div class="card-header pb-2 pt-3 d-flex w-100 justify-content-between"><h3 class="mb-0">Data <?= $nama_lokasi ?> pada <?= $this->session->userdata('data_tglawal') ?> sampai <?= $this->session->userdata('data_tglakhir') ?></h3>
-					<div class="d-flex align-items-center">
-						<h4 class="mb-0 me-2 fw-normal">Data dalam :</h4>
-						<div class="d-flex rounded border" style="width:max-content;overflow:hidden">
 
-							<a href="<?= base_url() ?>datapos/ubah_session?sesi=hari">
-								<div class="border-end px-3 py-2 <?= ($this->session->userdata('sesi_data') == 'hari') ? 'text-white fw-bold': 'text-dark'?> " style="background:<?= ($this->session->userdata('sesi_data') == 'hari') ? '#303481': ''?>">
-									Hari
-								</div>
-							</a>
-							<a href="<?= base_url() ?>datapos/ubah_session?sesi=bulan">
-								<div class="border-end px-3 py-2 <?= ($this->session->userdata('sesi_data') == 'bulan') ? 'text-white fw-bold': 'text-dark'?> " style="background:<?= ($this->session->userdata('sesi_data') == 'bulan') ? '#303481': ''?>">
-									Bulan
-								</div>
-							</a>
-							<a href="<?= base_url() ?>datapos/ubah_session?sesi=tahun">
-								<div class="px-3 py-2 <?= ($this->session->userdata('sesi_data') == 'tahun') ? 'text-white fw-bold': 'text-dark'?> " style="background:<?= ($this->session->userdata('sesi_data') == 'tahun') ? '#303481': ''?>">
-									Tahun
-								</div>
-							</a>
-						</div>
-					</div>
-				</div>
+			<div class="card">
+				<div class="card-header pb-2 pt-3"><h3 class="mb-0" id="head-title">Pilih pos & rentang tanggal, lalu klik Tampil</h3></div>
 				<div class="card-body px-3">
 					<div class="table-responsive">
 						<table class="table table-bordered" id="tabel">
-							<thead>
-								<tr>
-									<?php if($parameter != "kosong"){
-									?>
-									<td>Waktu</td>
-									<?php
-	foreach($parameter->result() as $kolom){
-									?>
-									<td><?php echo str_replace('_',' ',$kolom->nama_parameter) ?></td>
-
-									<?php 
-		} 
-} ?>
-								</tr>
-							</thead>
-							<?php
-							if($datapos != "kosong"){
-								foreach( $datapos as $data )
-								{ ?>
-							<tr>
-								<td><?php echo $data['waktu'] ?></td>
-
-								<?php
-									foreach($parameter->result() as $kolom){
-										$sensor =$kolom->nama_parameter;
-								?>
-
-								<td><?php echo number_format($data[$sensor],3) ?> <?= $kolom->satuan?>  </td>
-
-								<?php } ?>
-
-							</tr>
-							<?php } }?>
+							<thead></thead>
+							<tbody></tbody>
 						</table>
 					</div>
 				</div>
@@ -145,260 +82,276 @@
 		</div>
 	</div>
 </div>
-<script type="text/javascript">
-	var tmp;
-	function strip(html) {
-		tmp = document.createElement("DIV");
-		tmp.innerHTML = html;
-		console.log(tmp.innerText);
-		console.log(tmp.textContent);
 
-		return tmp.textContent || tmp.innerText || "";
-	}
-	var tableToExcel = (function() {
-		var uri = 'data:application/vnd.ms-excel;base64,',
-			template = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>{worksheet}</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body><table>{table}</table></body></html>',
-			base64 = function(s) {
-				return window.btoa(unescape(encodeURIComponent(s)))
-			},
-			format = function(s, c) {
-				return s.replace(/{(\w+)}/g, function(m, p) {
-					return c[p];
-				})
-			}
-		return function(table, name, filename) {
-			if (!table.nodeType) 
-				table = $('#'+table).clone();
-
-			var hyperLinks = table.find('a');
-			for (i = 0; i < hyperLinks.length; i++) {
-
-				var sp1 = document.createElement("span");
-				var sp1_content = document.createTextNode($(hyperLinks[i]).text());
-				sp1.appendChild(sp1_content);
-				var sp2 = hyperLinks[i];
-				var parentDiv = sp2.parentNode;
-				parentDiv.replaceChild(sp1, sp2);
-			}
-
-			var ctx = {
-				worksheet: name || 'Worksheet',
-				table: table[0].innerHTML
-			}
-
-
-			document.getElementById("dlink").href = uri + base64(format(template, ctx));
-			document.getElementById("dlink").download = filename;
-			document.getElementById("dlink").click();
-
-		}
-	})()
-</script>
-<script>
-	// @formatter:off
-	document.addEventListener("DOMContentLoaded", function () {
-		var el;
-		window.TomSelect && (new TomSelect(el = document.getElementById('select-pos'), {
-		}));
-	});
-	// @formatter:on
-</script>
-
-<!-- Modal Progress Download (inline-style, tidak bergantung pada Bootstrap JS) -->
-<div id="downloadProgressOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:99998;"></div>
-<div id="downloadProgressModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,0.3);z-index:99999;width:90%;max-width:480px;font-family:inherit;">
-	<div style="padding:16px 20px;border-bottom:1px solid #e9ecef;">
-		<h5 style="margin:0;font-size:1.1rem;font-weight:600;color:#1e293b;">Memproses Download Data</h5>
-	</div>
-	<div style="padding:20px;">
-		<div style="margin-bottom:10px;font-size:0.95rem;color:#1e293b;" id="downloadProgressLabel">Mempersiapkan...</div>
-		<div style="background:#e9ecef;border-radius:6px;overflow:hidden;height:22px;margin-bottom:10px;">
-			<div id="downloadProgressBar" style="background:#2fb344;color:#fff;height:100%;width:0%;text-align:center;line-height:22px;font-size:0.85rem;font-weight:600;transition:width 0.3s ease;">0%</div>
+<!-- Modal Progress -->
+<div class="modal fade" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+	<div class="modal-dialog modal-sm modal-dialog-centered">
+		<div class="modal-content">
+			<div class="modal-body px-3 py-3">
+				<div class="mb-2 text-center">
+					<span class="badge bg-blue-lt me-2">Status: <span id="statusText">idle</span></span>
+				</div>
+				<div class="progress mt-3" role="progressbar" aria-label="Progress" style="height:30px">
+					<div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%">0%</div>
+				</div>
+			</div>
 		</div>
-		<div style="font-size:0.85rem;color:#6c757d;" id="downloadProgressDetail">0 dari 0 bagian</div>
-	</div>
-	<div id="downloadProgressFooter" style="display:none;padding:12px 20px;border-top:1px solid #e9ecef;text-align:right;">
-		<button type="button" id="downloadProgressClose" style="padding:6px 14px;background:#6c757d;color:#fff;border:none;border-radius:4px;cursor:pointer;">Tutup</button>
 	</div>
 </div>
 
-<!-- Embed data dari PHP untuk diolah client-side -->
-<?php if ($datapos != "kosong"): ?>
 <script>
-	window.DATAPOS_DATA = <?= json_encode($datapos) ?>;
-	window.DATAPOS_PARAMETER = <?= json_encode($parameter->result_array()) ?>;
+	$(function () {
+		$('#awal_new').datetimepicker({ timepicker: false, format: 'Y-m-d' });
+		$('#akhir_new').datetimepicker({ timepicker: false, format: 'Y-m-d' });
+	});
 </script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<?php endif; ?>
 
 <script>
-(function(){
-	function start(){
-		var btn = document.getElementById('btnDownloadExcel');
-		console.log('[DownloadExcel] init, btn=', btn);
-		if (!btn) { console.warn('[DownloadExcel] tombol tidak ditemukan'); return; }
+(function () {
+	function start() {
+		var WEEK_URL = '<?= site_url('datapos/fetch_week') ?>';
+		var EXPORT_URL = '<?= site_url('datapos/excel_export') ?>';
 
-		var modalEl = document.getElementById('downloadProgressModal');
-		var overlayEl = document.getElementById('downloadProgressOverlay');
-		var bar = document.getElementById('downloadProgressBar');
-		var label = document.getElementById('downloadProgressLabel');
-		var detail = document.getElementById('downloadProgressDetail');
-		var footer = document.getElementById('downloadProgressFooter');
-		var closeBtn = document.getElementById('downloadProgressClose');
+		var $form    = $('#fetchForm');
+		var $status  = $('#statusText');
+		var $bar     = $('#progressBar');
+		var $modal   = $('#exampleModal');
+		var exportBtn = document.getElementById('btn-export');
 
-		function showModal(){
-			footer.style.display = 'none';
-			overlayEl.style.display = 'block';
-			modalEl.style.display = 'block';
-		}
-		function hideModal(){
-			overlayEl.style.display = 'none';
-			modalEl.style.display = 'none';
-		}
-		function showFooter(){ footer.style.display = 'block'; }
-		if (closeBtn) closeBtn.addEventListener('click', hideModal);
+		var lastRowsForExport = [];
+		var lastTitle = '';
 
-		function setProgress(done, total, text){
-			var pct = total ? Math.round((done/total)*100) : 0;
-			bar.style.width = pct + '%';
-			bar.textContent = pct + '%';
-			detail.textContent = done + ' dari ' + total + ' bagian';
-			if (text) label.textContent = text;
-		}
+		function setStatus(msg) { $status.text(msg); }
+		function setPct(pct) { $bar.css('width', pct + '%').text(Math.round(pct) + '%'); }
 
-		function parseDt(s){
-			if (!s) return null;
-			var parts = String(s).trim().split(/[\s\-:]/);
-			var y = parseInt(parts[0],10), mo = parseInt(parts[1],10)-1, d = parseInt(parts[2],10);
-			var h = parts[3] ? parseInt(parts[3],10) : 0;
-			var mi = parts[4] ? parseInt(parts[4],10) : 0;
-			if (isNaN(y) || isNaN(mo) || isNaN(d)) return null;
-			return new Date(y, mo, d, h, mi, 0);
-		}
-		function diffDays(a,b){
-			return Math.ceil((b.getTime()-a.getTime()) / (1000*60*60*24));
-		}
-
-		// Hitung jumlah chunk berdasarkan rentang tanggal (untuk visualisasi progress)
-		function calcChunkSize(totalDays){
-			if (totalDays > 30) return 7;   // > 1 bulan → per 1 minggu
-			if (totalDays > 3) return 3;    // > 3 hari → per 3 hari
-			return totalDays || 1;          // ≤ 3 hari → 1 chunk
-		}
-
-		// Split data array menjadi N bagian dengan boundary harian (cur+chunkDays)
-		function splitDataByDateRange(data, startDt, chunkDays){
-			var groups = [];
-			var current = [];
-			var groupEnd = new Date(startDt.getFullYear(), startDt.getMonth(), startDt.getDate() + chunkDays, 0, 0, 0);
-			for (var i = 0; i < data.length; i++){
-				var row = data[i];
-				var rowDt = parseDt(row.waktu);
-				while (rowDt && rowDt >= groupEnd) {
-					groups.push(current);
-					current = [];
-					groupEnd = new Date(groupEnd.getFullYear(), groupEnd.getMonth(), groupEnd.getDate() + chunkDays, 0, 0, 0);
-				}
-				current.push(row);
-			}
-			if (current.length) groups.push(current);
-			return groups;
-		}
-
-		// Bersihkan judul untuk nama file
-		function sanitizeFilename(s){
-			return String(s).replace(/[\\\/:*?"<>|]/g, '_').slice(0, 120);
-		}
-
-		btn.addEventListener('click', function(ev){
-			ev.preventDefault();
-			console.log('[DownloadExcel] click fired');
-
-			if (typeof XLSX === 'undefined') {
-				alert('Library Excel belum siap. Coba refresh halaman.');
-				return;
-			}
-
-			var data = window.DATAPOS_DATA || [];
-			var parameter = window.DATAPOS_PARAMETER || [];
-			if (!data.length || !parameter.length) {
-				alert('Tidak ada data untuk diunduh.');
-				return;
-			}
-
-			var tglAwal = btn.dataset.tglAwal;
-			var tglAkhir = btn.dataset.tglAkhir;
-			var judul = btn.dataset.judul || 'Data Pos';
-			var sAwal = parseDt(tglAwal);
-			var sAkhir = parseDt(tglAkhir);
-			var totalDays = (sAwal && sAkhir) ? diffDays(sAwal, sAkhir) : 1;
-			var chunkDays = calcChunkSize(totalDays);
-
-			// Split data berdasarkan chunk hari
-			var groups = sAwal ? splitDataByDateRange(data, sAwal, chunkDays) : [data];
-			if (groups.length === 0) groups = [data];
-			console.log('[DownloadExcel] totalDays=', totalDays, 'chunkDays=', chunkDays, 'groups=', groups.length);
-
-			showModal();
-			setProgress(0, groups.length, 'Memulai pengolahan data dalam ' + groups.length + ' bagian...');
-
-			// Bangun header row
-			var header = ['Waktu'];
-			for (var p = 0; p < parameter.length; p++) {
-				header.push(String(parameter[p].nama_parameter).replace(/_/g, ' ') + ' (' + parameter[p].satuan + ')');
-			}
-
-			var aoa = [[judul], header];
-			var idx = 0;
-
-			function processNext(){
-				if (idx >= groups.length) {
-					setProgress(groups.length, groups.length, 'Membuat file Excel...');
-					setTimeout(function(){
-						try {
-							var ws = XLSX.utils.aoa_to_sheet(aoa);
-							// Merge cells untuk title row (A1 sampai kolom terakhir)
-							var lastCol = header.length - 1;
-							ws['!merges'] = [{ s: { r:0, c:0 }, e: { r:0, c:lastCol } }];
-							// Set column widths
-							ws['!cols'] = header.map(function(){ return { wch: 18 }; });
-							var wb = XLSX.utils.book_new();
-							XLSX.utils.book_append_sheet(wb, ws, 'Data');
-							XLSX.writeFile(wb, sanitizeFilename(judul) + '.xlsx');
-							setProgress(groups.length, groups.length, 'Selesai. File akan diunduh.');
-							setTimeout(hideModal, 800);
-						} catch (err) {
-							console.error(err);
-							label.textContent = 'Gagal membuat Excel: ' + err.message;
-							showFooter();
-						}
-					}, 100);
+		// === Fallback show/hide modal kalau bootstrap.Modal tidak tersedia ===
+		function showModal() {
+			try {
+				if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+					bootstrap.Modal.getOrCreateInstance($modal[0]).show();
 					return;
 				}
-				var group = groups[idx];
-				setProgress(idx, groups.length, 'Mengolah bagian ' + (idx+1) + ' dari ' + groups.length + ' (' + group.length + ' baris)');
-				// Tambahkan rows dari group ke AOA
-				for (var r = 0; r < group.length; r++) {
-					var row = group[r];
-					var rowArr = [row.waktu];
-					for (var p = 0; p < parameter.length; p++) {
-						var key = parameter[p].nama_parameter;
-						var val = row[key];
-						if (val === null || val === undefined || val === '') {
-							rowArr.push('');
-						} else {
-							var n = Number(val);
-							rowArr.push(isNaN(n) ? val : Number(n.toFixed(2)));
-						}
-					}
-					aoa.push(rowArr);
-				}
-				idx++;
-				// Delay kecil agar progress bar terlihat update
-				setTimeout(processNext, 50);
+			} catch (e) {}
+			$modal[0].classList.add('show');
+			$modal[0].style.display = 'block';
+			$modal[0].removeAttribute('aria-hidden');
+			document.body.classList.add('modal-open');
+			if (!document.getElementById('__bbwsso_backdrop')) {
+				var bd = document.createElement('div');
+				bd.id = '__bbwsso_backdrop';
+				bd.className = 'modal-backdrop fade show';
+				document.body.appendChild(bd);
 			}
-			processNext();
+		}
+		function hideModal() {
+			try {
+				if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+					bootstrap.Modal.getOrCreateInstance($modal[0]).hide();
+					return;
+				}
+			} catch (e) {}
+			$modal[0].classList.remove('show');
+			$modal[0].style.display = 'none';
+			$modal[0].setAttribute('aria-hidden', 'true');
+			document.body.classList.remove('modal-open');
+			var bd = document.getElementById('__bbwsso_backdrop');
+			if (bd) bd.parentNode.removeChild(bd);
+		}
+
+		// === Generate chunks (per minggu kalau >30hr, per 3hr kalau >3hr, 1 chunk kalau ≤3hr) ===
+		function generateChunks(awal, akhir) {
+			var endDt = new Date(akhir + 'T00:00:00');
+			var startDt = new Date(awal + 'T00:00:00');
+			var totalDays = Math.floor((endDt - startDt) / (1000 * 60 * 60 * 24)) + 1;
+			var chunkSize;
+			if (totalDays > 30) chunkSize = 7;
+			else if (totalDays > 3) chunkSize = 3;
+			else chunkSize = totalDays;
+
+			var chunks = [];
+			var cursor = new Date(startDt);
+			function fmt(d) {
+				var y = d.getFullYear(), m = d.getMonth() + 1, dd = d.getDate();
+				return y + '-' + (m < 10 ? '0' + m : m) + '-' + (dd < 10 ? '0' + dd : dd);
+			}
+			while (cursor <= endDt) {
+				var wStart = new Date(cursor);
+				var wEnd = new Date(cursor);
+				wEnd.setDate(wEnd.getDate() + (chunkSize - 1));
+				if (wEnd > endDt) wEnd.setTime(endDt.getTime());
+				chunks.push({ start: fmt(wStart), end: fmt(wEnd) });
+				cursor.setDate(cursor.getDate() + chunkSize);
+			}
+			return chunks;
+		}
+
+		// === Render tabel ===
+		function renderTable(rows, parameters) {
+			var sel = '#tabel';
+			if (!rows || rows.length === 0) {
+				$(sel + ' thead').html('<tr><th>Tidak ada data</th></tr>');
+				$(sel + ' tbody').empty();
+				return;
+			}
+			var esc = function (s) {
+				return String(s).replace(/[&<>"']/g, function (m) {
+					return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m];
+				});
+			};
+			var keys = ['waktu'];
+			parameters.forEach(function (p) { keys.push(p.nama_parameter); });
+
+			var thead = '<tr>' + keys.map(function (k) {
+				if (k === 'waktu') return '<th>Waktu</th>';
+				var unit = '';
+				for (var i = 0; i < parameters.length; i++) {
+					if (parameters[i].nama_parameter === k) { unit = parameters[i].satuan; break; }
+				}
+				return '<th>' + esc(String(k).replace(/_/g, ' ')) + (unit ? ' (' + esc(unit) + ')' : '') + '</th>';
+			}).join('') + '</tr>';
+			$(sel + ' thead').html(thead);
+
+			var tbody = rows.map(function (row) {
+				return '<tr>' + keys.map(function (k) {
+					var v = row[k];
+					if (v === undefined || v === null || v === '') return '<td></td>';
+					if (k === 'waktu') return '<td>' + esc(v) + '</td>';
+					var n = Number(v);
+					return '<td>' + (isFinite(n) ? n.toFixed(3) : esc(v)) + '</td>';
+				}).join('') + '</tr>';
+			}).join('');
+			$(sel + ' tbody').html(tbody);
+		}
+
+		// === Fetch parameter sekali untuk header tabel ===
+		function fetchParameters(id_logger) {
+			return $.getJSON('<?= site_url('datapos/get_parameter') ?>', { id_logger: id_logger })
+				.then(function (resp) { return resp.parameters || []; });
+		}
+
+		// === Fetch semua chunks berurutan ===
+		function fetchAllChunks(id_logger, awal, akhir, sesi) {
+			var chunks = generateChunks(awal, akhir);
+			var total = chunks.length;
+			var allRows = [];
+
+			console.log('[fetch] ' + total + ' chunks, id_logger=' + id_logger + ', sesi=' + sesi);
+
+			function nextChunk(i) {
+				if (i >= total) return Promise.resolve(allRows);
+				var c = chunks[i];
+				var pct = Math.round((i / total) * 100);
+				setStatus('Memuat bagian ' + (i + 1) + ' dari ' + total + ' (' + c.start + ' s/d ' + c.end + ')');
+				setPct(pct);
+
+				var params = $.param({ id_logger: id_logger, awal: c.start, akhir: c.end, sesi: sesi });
+				return fetch(WEEK_URL + '?' + params, { credentials: 'same-origin' })
+					.then(function (r) { return r.ok ? r.json() : { status: 'error', rows: [] }; })
+					.then(function (data) {
+						if (data.status === 'ok' && Array.isArray(data.rows)) {
+							allRows = allRows.concat(data.rows);
+							console.log('[chunk ' + (i + 1) + '/' + total + '] +' + data.rows.length + ' rows (total: ' + allRows.length + ')');
+						} else if (data.status === 'error') {
+							console.warn('[chunk ' + (i + 1) + '] ' + data.message);
+						}
+						return nextChunk(i + 1);
+					})
+					.catch(function (err) {
+						console.warn('[chunk ' + (i + 1) + '] fetch error: ' + err.message);
+						return nextChunk(i + 1);
+					});
+			}
+			return nextChunk(0);
+		}
+
+		// === Form submit (Tampil) ===
+		$form.on('submit', function (e) {
+			e.preventDefault();
+			var raw       = $('#select-pos').val() || '';
+			var id_logger = raw.split('|')[0].trim();
+			var namaPos   = (raw.split('|')[1] || '').trim();
+			var awal      = $('#awal_new').val();
+			var akhir     = $('#akhir_new').val();
+			var sesi      = $('#select-sesi').val() || 'hari';
+
+			if (!id_logger || !awal || !akhir) {
+				alert('Pilih pos dan isi rentang tanggal terlebih dahulu.');
+				return;
+			}
+			if (new Date(akhir + 'T00:00:00') < new Date(awal + 'T00:00:00')) {
+				alert('Tanggal Sampai tidak boleh sebelum Dari.');
+				return;
+			}
+
+			exportBtn.disabled = true;
+			lastRowsForExport = [];
+			showModal();
+			setStatus('Memulai...');
+			setPct(0);
+
+			// Ambil parameter (header) sekali, lalu fetch data per chunk
+			fetchParameters(id_logger)
+				.then(function (parameters) {
+					return fetchAllChunks(id_logger, awal, akhir, sesi)
+						.then(function (rows) {
+							setPct(100);
+							setStatus('Selesai — ' + rows.length + ' baris');
+							lastRowsForExport = rows;
+							lastTitle = 'Data ' + namaPos + ' pada ' + awal + ' sampai ' + akhir;
+							setTimeout(function () {
+								hideModal();
+								renderTable(rows, parameters);
+								$('#head-title').text(lastTitle);
+								exportBtn.disabled = rows.length === 0;
+								// Simpan parameter di tombol download
+								exportBtn.dataset.parameter = JSON.stringify(parameters);
+							}, 400);
+						});
+				})
+				.catch(function (err) {
+					console.error(err);
+					setStatus('Error: ' + err.message);
+					setTimeout(hideModal, 1500);
+				});
 		});
+
+		// === Download Excel ===
+		exportBtn.addEventListener('click', function () {
+			if (!lastRowsForExport.length) {
+				alert('Belum ada data. Klik Tampil dulu.');
+				return;
+			}
+			var $spinner = $('.spinner-border', exportBtn);
+			$spinner.show();
+			exportBtn.disabled = true;
+
+			var fd = new FormData();
+			fd.append('title', lastTitle);
+			fd.append('data', JSON.stringify(lastRowsForExport));
+			fd.append('parameter', exportBtn.dataset.parameter || '[]');
+
+			fetch(EXPORT_URL, { method: 'POST', body: fd, credentials: 'same-origin' })
+				.then(function (resp) {
+					if (!resp.ok) throw new Error('HTTP ' + resp.status);
+					return resp.blob();
+				})
+				.then(function (blob) {
+					var filename = lastTitle.replace(/[^\w\- ]/g, '_') + '.xlsx';
+					var href = URL.createObjectURL(blob);
+					var a = Object.assign(document.createElement('a'), { href: href, download: filename });
+					document.body.appendChild(a); a.click(); a.remove();
+					setTimeout(function () { URL.revokeObjectURL(href); }, 2000);
+				})
+				.catch(function (err) {
+					console.error('Export error:', err);
+					alert('Gagal export Excel: ' + err.message);
+				})
+				.finally(function () {
+					$spinner.hide();
+					exportBtn.disabled = false;
+				});
+		});
+
 	}
 
 	if (document.readyState === 'loading') {

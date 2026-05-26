@@ -510,6 +510,226 @@ class Datapos extends CI_Controller {
 		echo json_encode($data);
 	}
 
+	public function get_parameter()
+	{
+		header('Content-Type: application/json; charset=UTF-8');
+		$idlogger = $this->input->get('id_logger');
+		if (!$idlogger || !preg_match('/^\d+$/', $idlogger)) {
+			echo json_encode(['parameters' => []]);
+			return;
+		}
+		$query = $this->db->query(
+			"SELECT * FROM t_logger INNER JOIN parameter_sensor ON t_logger.id_logger = parameter_sensor.logger_id
+			 WHERE parameter_sensor.logger_id = '" . $idlogger . "'
+			 ORDER BY cast(SUBSTRING(kolom_sensor,7) as unsigned)"
+		);
+		echo json_encode(['parameters' => $query->result_array()]);
+	}
+
+	public function fetch_week()
+	{
+		@set_time_limit(120);
+		@ini_set('memory_limit', '256M');
+
+		header('Content-Type: application/json; charset=UTF-8');
+		header('Cache-Control: no-cache, no-store');
+
+		$idlogger  = $this->input->get('id_logger');
+		$tgl_awal  = $this->input->get('awal');
+		$tgl_akhir = $this->input->get('akhir');
+		$sesi      = $this->input->get('sesi') ?: 'hari';
+
+		if (!$idlogger || !$tgl_awal || !$tgl_akhir) {
+			echo json_encode(['status' => 'error', 'message' => 'Parameter tidak lengkap', 'rows' => []]);
+			return;
+		}
+		if (!preg_match('/^\d+$/', $idlogger) ||
+			!preg_match('/^\d{4}-\d{2}-\d{2}$/', $tgl_awal) ||
+			!preg_match('/^\d{4}-\d{2}-\d{2}$/', $tgl_akhir)) {
+			echo json_encode(['status' => 'error', 'message' => 'Format parameter tidak valid', 'rows' => []]);
+			return;
+		}
+		if (!in_array($sesi, ['hari', 'bulan', 'tahun'], true)) $sesi = 'hari';
+
+		$row_logger = $this->db->where('id_logger', $idlogger)->get('t_logger')->row();
+		if (!$row_logger) {
+			echo json_encode(['status' => 'error', 'message' => 'Logger tidak ditemukan', 'rows' => []]);
+			return;
+		}
+		$tabel = $row_logger->tabel_main;
+
+		$query_parameter = $this->db->query(
+			"SELECT * FROM t_logger INNER JOIN parameter_sensor ON t_logger.id_logger = parameter_sensor.logger_id
+			 WHERE parameter_sensor.logger_id = '" . $idlogger . "'
+			 ORDER BY cast(SUBSTRING(kolom_sensor,7) as unsigned)"
+		);
+		$sensors = $query_parameter->result_array();
+		if (empty($sensors)) {
+			echo json_encode(['status' => 'error', 'message' => 'Sensor tidak ditemukan', 'rows' => []]);
+			return;
+		}
+
+		$select_parts = [];
+		foreach ($sensors as $s) {
+			$fn = ($s['satuan'] == 'mm') ? 'sum' : 'avg';
+			$select_parts[] = "{$fn}({$s['kolom_sensor']}) as {$s['nama_parameter']}";
+		}
+		$select_fix = implode(', ', $select_parts);
+
+		if ($sesi == 'hari') {
+			$group = 'HOUR(waktu),DAY(waktu),MONTH(waktu),YEAR(waktu)';
+		} else if ($sesi == 'bulan') {
+			$group = 'DAY(waktu),MONTH(waktu),YEAR(waktu)';
+		} else {
+			$group = 'MONTH(waktu),YEAR(waktu)';
+		}
+
+		$sql = "SELECT waktu, {$select_fix}
+				FROM {$tabel} USE INDEX(waktu)
+				WHERE code_logger = '" . $idlogger . "'
+				  AND waktu >= '{$tgl_awal} 00:00'
+				  AND waktu <= '{$tgl_akhir} 23:59'
+				GROUP BY {$group}
+				ORDER BY waktu ASC";
+
+		$result = $this->db->query($sql);
+		$rows = [];
+		if ($result && $result->num_rows() > 0) {
+			foreach ($result->result_array() as $row) {
+				// Transformasi khusus (sama seperti index())
+				if (array_key_exists("Debit", $row) && $idlogger == '10063') {
+					$debit = $this->kalimeneng($row['Debit']);
+					$row['Debit'] = $row['Debit'] < 0 ? 0 : $debit;
+				}
+				if (array_key_exists("Debit", $row) && $idlogger == '10249') {
+					$h = $row['Debit'];
+					$n2 = $row['Elevasi_Muka_Air'];
+					$row['Debit'] = $this->linear_interpolation($n2 * 100) * $h;
+				}
+				if (array_key_exists("Luas_Penampang_Basah", $row)) {
+					$n2 = $row['Elevasi_Muka_Air'];
+					$row['Luas_Penampang_Basah'] = $this->linear_interpolation($n2 * 100);
+				}
+				// Format output: kunci pakai nama_parameter (sudah sesuai SQL alias)
+				$formatted = ['waktu' => $row['waktu']];
+				foreach ($row as $col => $val) {
+					if ($col === 'waktu') continue;
+					$formatted[$col] = is_numeric($val) ? number_format((float)$val, 2, '.', '') : $val;
+				}
+				$rows[] = $formatted;
+			}
+		}
+
+		echo json_encode(['status' => 'ok', 'rows' => $rows]);
+	}
+
+	public function excel_export()
+	{
+		@ini_set('display_errors', 0);
+		error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_STRICT & ~E_WARNING);
+		while (ob_get_level() > 0) { ob_end_clean(); }
+		@ini_set('memory_limit', '1024M');
+		@set_time_limit(0);
+
+		$title    = $this->input->post('title', true) ?: 'Data';
+		$dataJson = $this->input->post('data');
+		$paramJson = $this->input->post('parameter');
+
+		if (!$dataJson) {
+			return $this->output
+				->set_status_header(400)
+				->set_content_type('application/json')
+				->set_output(json_encode(['error' => 'POST "data" kosong']));
+		}
+
+		$data      = json_decode(htmlspecialchars_decode($dataJson));
+		$parameter = json_decode(htmlspecialchars_decode($paramJson));
+
+		// Jika parameter tidak dikirim, ambil dari keys data
+		if (!$parameter) {
+			$parameter = [];
+			if (is_array($data) && !empty($data)) {
+				$first = (array)$data[0];
+				foreach ($first as $k => $v) {
+					if (strtolower($k) === 'waktu') continue;
+					$parameter[] = (object)[
+						'nama_parameter' => $k,
+						'satuan'         => '',
+						'kolom_sensor'   => $k,
+					];
+				}
+			}
+		}
+
+		include APPPATH . 'third_party/PHPExcel/PHPExcel.php';
+		$excel = new PHPExcel();
+		$excel->getProperties()->setCreator('Beacon Engineering')->setTitle($title)->setDescription('Data Semua Parameter');
+
+		$sheet = $excel->setActiveSheetIndex(0);
+		$rowTitle = 1;
+		$rowHeader = 2;
+		$sheet->setCellValue('A' . $rowHeader, 'Waktu');
+
+		$col = 'B';
+		if (!is_array($parameter)) $parameter = [];
+		foreach ($parameter as $p) {
+			$nama = isset($p->nama_parameter) ? $p->nama_parameter : (isset($p->alias_sensor) ? $p->alias_sensor : '');
+			$satuan = isset($p->satuan) ? $p->satuan : '';
+			$text = trim(str_replace('_', ' ', $nama) . ($satuan !== '' ? " ($satuan)" : ''));
+			$sheet->setCellValue($col . $rowHeader, $text);
+			$col++;
+		}
+
+		// Tulis data
+		$rowStart = $rowHeader + 1;
+		if (is_array($data)) {
+			$waktuKey = 'waktu';
+			if (!empty($data)) {
+				$first = (array)$data[0];
+				if (array_key_exists('Waktu', $first)) $waktuKey = 'Waktu';
+			}
+			foreach ($data as $i => $item) {
+				$arr = (array)$item;
+				$r = $rowStart + $i;
+				$sheet->setCellValue('A' . $r, isset($arr[$waktuKey]) ? $arr[$waktuKey] : '');
+				$c = 'B';
+				foreach ($parameter as $p) {
+					$field = isset($p->nama_parameter) ? $p->nama_parameter : (isset($p->kolom_sensor) ? $p->kolom_sensor : null);
+					$val = ($field !== null && isset($arr[$field])) ? $arr[$field] : '';
+					if (is_numeric($val)) {
+						$sheet->setCellValueExplicit($c . $r, number_format((float)$val, 2, '.', ''), PHPExcel_Cell_DataType::TYPE_STRING);
+					} else {
+						$sheet->setCellValue($c . $r, $val);
+					}
+					$c++;
+				}
+			}
+		}
+
+		// Styling
+		$lastCol = $sheet->getHighestColumn();
+		$firstIdx = PHPExcel_Cell::columnIndexFromString('A');
+		$lastIdx = PHPExcel_Cell::columnIndexFromString($lastCol);
+		for ($i = $firstIdx; $i <= $lastIdx; $i++) {
+			$letter = PHPExcel_Cell::stringFromColumnIndex($i - 1);
+			$sheet->getColumnDimension($letter)->setAutoSize(true);
+		}
+		$sheet->setCellValue('A' . $rowTitle, $title);
+		$sheet->mergeCells('A' . $rowTitle . ':' . $lastCol . $rowTitle);
+		$sheet->getStyle('A' . $rowTitle)->getFont()->setBold(true)->setSize(14);
+		$sheet->getStyle('A' . $rowHeader . ':' . $lastCol . $rowHeader)->getFont()->setBold(true);
+		$sheet->freezePane('A3');
+
+		$filename = preg_replace('/[^A-Za-z0-9_\- ]/', '_', $title) . '.xlsx';
+		while (ob_get_level() > 0) { ob_end_clean(); }
+		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+		header('Content-Disposition: attachment; filename="' . $filename . '"');
+		header('Cache-Control: max-age=0');
+		$writer = PHPExcel_IOFactory::createWriter($excel, 'Excel2007');
+		$writer->save('php://output');
+		exit;
+	}
+
 	public function chunk_data()
 	{
 		header('Content-Type: application/json');
