@@ -180,19 +180,45 @@
 </div>
 
 <script>
-(function(){
+document.addEventListener('DOMContentLoaded', function(){
 	var btn = document.getElementById('btnDownloadExcel');
 	if (!btn) return;
 
 	var modalEl = document.getElementById('downloadProgressModal');
-	var modal = (typeof bootstrap !== 'undefined' && bootstrap.Modal) ? new bootstrap.Modal(modalEl) : null;
 	var bar = document.getElementById('downloadProgressBar');
 	var label = document.getElementById('downloadProgressLabel');
 	var detail = document.getElementById('downloadProgressDetail');
 	var footer = document.getElementById('downloadProgressFooter');
+	var modal = null;
+	var backdropEl = null;
 
-	function showModal(){ footer.classList.add('d-none'); if (modal) modal.show(); else modalEl.style.display = 'block'; }
-	function hideModal(){ if (modal) modal.hide(); else modalEl.style.display = 'none'; }
+	function getModal(){
+		if (modal) return modal;
+		if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+			modal = new bootstrap.Modal(modalEl);
+		}
+		return modal;
+	}
+	function manualShow(){
+		modalEl.classList.add('show');
+		modalEl.style.display = 'block';
+		modalEl.removeAttribute('aria-hidden');
+		document.body.classList.add('modal-open');
+		if (!backdropEl) {
+			backdropEl = document.createElement('div');
+			backdropEl.className = 'modal-backdrop fade show';
+			document.body.appendChild(backdropEl);
+		}
+	}
+	function manualHide(){
+		modalEl.classList.remove('show');
+		modalEl.style.display = 'none';
+		modalEl.setAttribute('aria-hidden', 'true');
+		document.body.classList.remove('modal-open');
+		if (backdropEl) { backdropEl.parentNode.removeChild(backdropEl); backdropEl = null; }
+	}
+	function showModal(){ footer.classList.add('d-none'); var m = getModal(); if (m) m.show(); else manualShow(); }
+	function hideModal(){ var m = getModal(); if (m) m.hide(); else manualHide(); }
 	function showFooter(){ footer.classList.remove('d-none'); }
 	function setProgress(done, total, text){
 		var pct = total ? Math.round((done/total)*100) : 0;
@@ -315,5 +341,5 @@
 		}
 		next();
 	});
-})();
+});
 </script>
