@@ -44,16 +44,6 @@
 										value="<?= $this->session->userdata('data_tglakhir') ? substr($this->session->userdata('data_tglakhir'), 0, 10) : '' ?>"/>
 								</div>
 							</div>
-							<div class="col-12 col-md-2">
-								<div class="form-group">
-									<label class="form-label mt-2">Interval</label>
-									<select name="sesi" class="form-select" id="select-sesi">
-										<option value="hari" <?= ($this->session->userdata('sesi_data') == 'hari' || !$this->session->userdata('sesi_data')) ? 'selected' : '' ?>>Hari (per jam)</option>
-										<option value="bulan" <?= ($this->session->userdata('sesi_data') == 'bulan') ? 'selected' : '' ?>>Bulan (per hari)</option>
-										<option value="tahun" <?= ($this->session->userdata('sesi_data') == 'tahun') ? 'selected' : '' ?>>Tahun (per bulan)</option>
-									</select>
-								</div>
-							</div>
 							<div class="col-6 col-md-auto d-flex align-items-end mt-3 mt-md-0">
 								<button type="submit" class="btn btn-primary" id="btnTampil">Tampil</button>
 							</div>
@@ -69,7 +59,17 @@
 			</div>
 
 			<div class="card">
-				<div class="card-header pb-2 pt-3"><h3 class="mb-0" id="head-title">Pilih pos & rentang tanggal, lalu klik Tampil</h3></div>
+				<div class="card-header pb-2 pt-3 d-flex w-100 justify-content-between align-items-center flex-wrap">
+					<h3 class="mb-0" id="head-title">Pilih pos & rentang tanggal, lalu klik Tampil</h3>
+					<div class="d-flex align-items-center" id="intervalSwitcher" style="display:none !important">
+						<h4 class="mb-0 me-2 fw-normal">Data dalam :</h4>
+						<div class="d-flex rounded border" style="width:max-content;overflow:hidden">
+							<a href="#" data-interval="jam" class="intervalBtn px-3 py-2 text-white fw-bold" style="background:#303481;text-decoration:none">Jam</a>
+							<a href="#" data-interval="hari" class="intervalBtn px-3 py-2 text-dark border-start" style="text-decoration:none">Hari</a>
+							<a href="#" data-interval="bulan" class="intervalBtn px-3 py-2 text-dark border-start" style="text-decoration:none">Bulan</a>
+						</div>
+					</div>
+				</div>
 				<div class="card-body px-3">
 					<div class="table-responsive">
 						<table class="table table-bordered" id="tabel">
@@ -111,6 +111,7 @@
 	function start() {
 		var WEEK_URL = '<?= site_url('datapos/fetch_week') ?>';
 		var EXPORT_URL = '<?= site_url('datapos/excel_export') ?>';
+		var PARAM_URL = '<?= site_url('datapos/get_parameter') ?>';
 
 		var $form    = $('#fetchForm');
 		var $status  = $('#statusText');
@@ -118,13 +119,18 @@
 		var $modal   = $('#exampleModal');
 		var exportBtn = document.getElementById('btn-export');
 
-		var lastRowsForExport = [];
+		var rawRows = [];          // Data mentah per jam (cache satu kali fetch)
+		var displayRows = [];      // Hasil aggregasi sesuai interval saat ini
+		var parameters = [];
+		var currentInterval = 'jam';
 		var lastTitle = '';
+		var lastNamaPos = '';
+		var lastAwal = '';
+		var lastAkhir = '';
 
 		function setStatus(msg) { $status.text(msg); }
 		function setPct(pct) { $bar.css('width', pct + '%').text(Math.round(pct) + '%'); }
 
-		// === Fallback show/hide modal kalau bootstrap.Modal tidak tersedia ===
 		function showModal() {
 			try {
 				if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
@@ -185,10 +191,43 @@
 			return chunks;
 		}
 
-		// === Render tabel ===
-		function renderTable(rows, parameters) {
+		// === Aggregasi client-side dari rawRows (per jam) ke hari/bulan ===
+		function aggregate(raw, interval, params) {
+			if (interval === 'jam') return raw.slice();
+
+			var keyOf = interval === 'hari'
+				? function (w) { return String(w).slice(0, 10); }   // YYYY-MM-DD
+				: function (w) { return String(w).slice(0, 7); };   // YYYY-MM
+
+			var groups = {};
+			var order = [];
+			raw.forEach(function (row) {
+				var k = keyOf(row.waktu);
+				if (!groups[k]) { groups[k] = []; order.push(k); }
+				groups[k].push(row);
+			});
+
+			return order.map(function (k) {
+				var items = groups[k];
+				var out = { waktu: k };
+				params.forEach(function (p) {
+					var sum = 0, cnt = 0;
+					items.forEach(function (it) {
+						var v = Number(it[p.nama_parameter]);
+						if (isFinite(v)) { sum += v; cnt++; }
+					});
+					if (cnt === 0) { out[p.nama_parameter] = ''; return; }
+					var val = (p.satuan === 'mm') ? sum : (sum / cnt);
+					out[p.nama_parameter] = val.toFixed(2);
+				});
+				return out;
+			});
+		}
+
+		// === Render tabel dari displayRows ===
+		function renderTable() {
 			var sel = '#tabel';
-			if (!rows || rows.length === 0) {
+			if (!displayRows.length) {
 				$(sel + ' thead').html('<tr><th>Tidak ada data</th></tr>');
 				$(sel + ' tbody').empty();
 				return;
@@ -198,44 +237,60 @@
 					return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m];
 				});
 			};
-			var keys = ['waktu'];
-			parameters.forEach(function (p) { keys.push(p.nama_parameter); });
 
-			var thead = '<tr>' + keys.map(function (k) {
-				if (k === 'waktu') return '<th>Waktu</th>';
-				var unit = '';
-				for (var i = 0; i < parameters.length; i++) {
-					if (parameters[i].nama_parameter === k) { unit = parameters[i].satuan; break; }
-				}
-				return '<th>' + esc(String(k).replace(/_/g, ' ')) + (unit ? ' (' + esc(unit) + ')' : '') + '</th>';
-			}).join('') + '</tr>';
+			var thead = '<tr><th>Waktu</th>';
+			parameters.forEach(function (p) {
+				thead += '<th>' + esc(String(p.nama_parameter).replace(/_/g, ' ')) + (p.satuan ? ' (' + esc(p.satuan) + ')' : '') + '</th>';
+			});
+			thead += '</tr>';
 			$(sel + ' thead').html(thead);
 
-			var tbody = rows.map(function (row) {
-				return '<tr>' + keys.map(function (k) {
-					var v = row[k];
-					if (v === undefined || v === null || v === '') return '<td></td>';
-					if (k === 'waktu') return '<td>' + esc(v) + '</td>';
+			var tbody = displayRows.map(function (row) {
+				var html = '<tr><td>' + esc(row.waktu) + '</td>';
+				parameters.forEach(function (p) {
+					var v = row[p.nama_parameter];
+					if (v === undefined || v === null || v === '') { html += '<td></td>'; return; }
 					var n = Number(v);
-					return '<td>' + (isFinite(n) ? n.toFixed(3) : esc(v)) + '</td>';
-				}).join('') + '</tr>';
+					html += '<td>' + (isFinite(n) ? n.toFixed(3) : esc(v)) + (p.satuan ? ' ' + esc(p.satuan) : '') + '</td>';
+				});
+				html += '</tr>';
+				return html;
 			}).join('');
 			$(sel + ' tbody').html(tbody);
 		}
 
-		// === Fetch parameter sekali untuk header tabel ===
-		function fetchParameters(id_logger) {
-			return $.getJSON('<?= site_url('datapos/get_parameter') ?>', { id_logger: id_logger })
-				.then(function (resp) { return resp.parameters || []; });
+		// === Switch interval (tanpa fetch ulang) ===
+		function switchInterval(interval) {
+			currentInterval = interval;
+			$('.intervalBtn').each(function () {
+				var $a = $(this);
+				if ($a.data('interval') === interval) {
+					$a.removeClass('text-dark').addClass('text-white fw-bold').css('background', '#303481');
+				} else {
+					$a.removeClass('text-white fw-bold').addClass('text-dark').css('background', '');
+				}
+			});
+			displayRows = aggregate(rawRows, interval, parameters);
+			renderTable();
 		}
 
-		// === Fetch semua chunks berurutan ===
-		function fetchAllChunks(id_logger, awal, akhir, sesi) {
+		$(document).on('click', '.intervalBtn', function (e) {
+			e.preventDefault();
+			switchInterval($(this).data('interval'));
+		});
+
+		// === Fetch parameter (header) ===
+		function fetchParameters(id_logger) {
+			return fetch(PARAM_URL + '?id_logger=' + encodeURIComponent(id_logger), { credentials: 'same-origin' })
+				.then(function (r) { return r.json(); })
+				.then(function (j) { return j.parameters || []; });
+		}
+
+		// === Fetch semua chunks per jam (sesi=hari di backend) ===
+		function fetchAllChunks(id_logger, awal, akhir) {
 			var chunks = generateChunks(awal, akhir);
 			var total = chunks.length;
 			var allRows = [];
-
-			console.log('[fetch] ' + total + ' chunks, id_logger=' + id_logger + ', sesi=' + sesi);
 
 			function nextChunk(i) {
 				if (i >= total) return Promise.resolve(allRows);
@@ -244,13 +299,12 @@
 				setStatus('Memuat bagian ' + (i + 1) + ' dari ' + total + ' (' + c.start + ' s/d ' + c.end + ')');
 				setPct(pct);
 
-				var params = $.param({ id_logger: id_logger, awal: c.start, akhir: c.end, sesi: sesi });
+				var params = $.param({ id_logger: id_logger, awal: c.start, akhir: c.end, sesi: 'hari' });
 				return fetch(WEEK_URL + '?' + params, { credentials: 'same-origin' })
 					.then(function (r) { return r.ok ? r.json() : { status: 'error', rows: [] }; })
 					.then(function (data) {
 						if (data.status === 'ok' && Array.isArray(data.rows)) {
 							allRows = allRows.concat(data.rows);
-							console.log('[chunk ' + (i + 1) + '/' + total + '] +' + data.rows.length + ' rows (total: ' + allRows.length + ')');
 						} else if (data.status === 'error') {
 							console.warn('[chunk ' + (i + 1) + '] ' + data.message);
 						}
@@ -272,7 +326,6 @@
 			var namaPos   = (raw.split('|')[1] || '').trim();
 			var awal      = $('#awal_new').val();
 			var akhir     = $('#akhir_new').val();
-			var sesi      = $('#select-sesi').val() || 'hari';
 
 			if (!id_logger || !awal || !akhir) {
 				alert('Pilih pos dan isi rentang tanggal terlebih dahulu.');
@@ -284,29 +337,32 @@
 			}
 
 			exportBtn.disabled = true;
-			lastRowsForExport = [];
+			$('#intervalSwitcher').hide();
+			rawRows = []; displayRows = []; parameters = [];
 			showModal();
 			setStatus('Memulai...');
 			setPct(0);
 
-			// Ambil parameter (header) sekali, lalu fetch data per chunk
 			fetchParameters(id_logger)
-				.then(function (parameters) {
-					return fetchAllChunks(id_logger, awal, akhir, sesi)
-						.then(function (rows) {
-							setPct(100);
-							setStatus('Selesai — ' + rows.length + ' baris');
-							lastRowsForExport = rows;
-							lastTitle = 'Data ' + namaPos + ' pada ' + awal + ' sampai ' + akhir;
-							setTimeout(function () {
-								hideModal();
-								renderTable(rows, parameters);
-								$('#head-title').text(lastTitle);
-								exportBtn.disabled = rows.length === 0;
-								// Simpan parameter di tombol download
-								exportBtn.dataset.parameter = JSON.stringify(parameters);
-							}, 400);
-						});
+				.then(function (params) {
+					parameters = params;
+					return fetchAllChunks(id_logger, awal, akhir);
+				})
+				.then(function (rows) {
+					rawRows = rows;
+					lastNamaPos = namaPos;
+					lastAwal = awal;
+					lastAkhir = akhir;
+					lastTitle = 'Data ' + namaPos + ' pada ' + awal + ' sampai ' + akhir;
+					setPct(100);
+					setStatus('Selesai — ' + rows.length + ' baris');
+					setTimeout(function () {
+						hideModal();
+						$('#head-title').text(lastTitle);
+						$('#intervalSwitcher').css('display', 'flex');
+						exportBtn.disabled = rows.length === 0;
+						switchInterval('jam');   // default tampilan per jam
+					}, 400);
 				})
 				.catch(function (err) {
 					console.error(err);
@@ -315,9 +371,9 @@
 				});
 		});
 
-		// === Download Excel ===
+		// === Download Excel (sesuai interval yang sedang ditampilkan) ===
 		exportBtn.addEventListener('click', function () {
-			if (!lastRowsForExport.length) {
+			if (!displayRows.length) {
 				alert('Belum ada data. Klik Tampil dulu.');
 				return;
 			}
@@ -325,10 +381,13 @@
 			$spinner.show();
 			exportBtn.disabled = true;
 
+			var labelInterval = currentInterval === 'jam' ? 'per jam' : (currentInterval === 'hari' ? 'per hari' : 'per bulan');
+			var titleForExport = lastTitle + ' (' + labelInterval + ')';
+
 			var fd = new FormData();
-			fd.append('title', lastTitle);
-			fd.append('data', JSON.stringify(lastRowsForExport));
-			fd.append('parameter', exportBtn.dataset.parameter || '[]');
+			fd.append('title', titleForExport);
+			fd.append('data', JSON.stringify(displayRows));
+			fd.append('parameter', JSON.stringify(parameters));
 
 			fetch(EXPORT_URL, { method: 'POST', body: fd, credentials: 'same-origin' })
 				.then(function (resp) {
@@ -336,7 +395,7 @@
 					return resp.blob();
 				})
 				.then(function (blob) {
-					var filename = lastTitle.replace(/[^\w\- ]/g, '_') + '.xlsx';
+					var filename = titleForExport.replace(/[^\w\- ]/g, '_') + '.xlsx';
 					var href = URL.createObjectURL(blob);
 					var a = Object.assign(document.createElement('a'), { href: href, download: filename });
 					document.body.appendChild(a); a.click(); a.remove();
@@ -351,7 +410,6 @@
 					exportBtn.disabled = false;
 				});
 		});
-
 	}
 
 	if (document.readyState === 'loading') {
