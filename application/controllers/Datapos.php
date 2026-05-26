@@ -516,6 +516,12 @@ class Datapos extends CI_Controller {
 
 	function export_excel (){
 
+		@ini_set('display_errors', 0);
+		error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_STRICT & ~E_WARNING);
+		while (ob_get_level() > 0) {
+			ob_end_clean();
+		}
+
 		include APPPATH.'third_party/PHPExcel/PHPExcel.php';
 
 		// Panggil class PHPExcel nya
@@ -558,10 +564,15 @@ class Datapos extends CI_Controller {
 		}
 		$excel->setActiveSheetIndex(0)->setCellValue('A1', $title);
 		$excel->setActiveSheetIndex(0)->mergeCells('A1:'.$cl.'1');
+
+		while (ob_get_level() > 0) {
+			ob_end_clean();
+		}
 		header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 		header('Content-Disposition: attachment; filename="'.$title.'.xlsx"'); // Set nama file excel nya
 		header('Cache-Control: max-age=0');
 		$write = PHPExcel_IOFactory::createWriter($excel, 'Excel2007');
 		$write->save('php://output');
+		exit;
 	}
 }
