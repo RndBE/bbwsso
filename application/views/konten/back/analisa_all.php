@@ -814,12 +814,14 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 															<?= $informasi->nama_pic == '' ? '-' : $informasi->nama_pic ?>
 														</td>
 													</tr>
-													<tr>
-														<td class="fw-bold">Nomor Penjaga</td>
-														<td class="text-end">
-															<?= $informasi->no_pic == '' ? '-' : $informasi->no_pic ?>
-														</td>
-													</tr>
+													<?php if (!(isset($aset) && $aset === 'psda')) { ?>
+														<tr>
+															<td class="fw-bold">Nomor Penjaga</td>
+															<td class="text-end">
+																<?= $informasi->no_pic == '' ? '-' : $informasi->no_pic ?>
+															</td>
+														</tr>
+													<?php } ?>
 												</tbody>
 											</table>
 											<?php if ($foto_pos) { ?>
