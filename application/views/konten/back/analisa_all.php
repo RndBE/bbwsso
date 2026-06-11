@@ -132,6 +132,7 @@ $range = $data_sensor->range;
 $typegraf = $data_sensor->tipe_grafik;
 $mode = $data_sensor->mode_data ?? 'hari';
 $idLogger = $data_sensor->idLogger;
+$grupAktif = isset($grup) ? $grup : null; // grup entitas split (mis. 10247_371)
 $tglPada = $data_sensor->pada;
 $tglDari = $data_sensor->dari;
 $tglSampai = $data_sensor->sampai;
@@ -319,9 +320,11 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 											<?php foreach ($pilih_pos as $mnpos):
 												$merge = explode('_', $mnpos->idLogger);
 												$log_select = $merge[0];
+												$grup_select = isset($merge[2]) ? $merge[2] : null;
+												$is_selected = ($idLogger == $log_select) && ((string) $grup_select === (string) $grupAktif);
 												?>
 
-												<option value="<?= $mnpos->idLogger ?>" <?= ($idLogger == $log_select) ? 'selected' : '' ?>><?= str_replace('_', ' ', $mnpos->namaPos) ?>
+												<option value="<?= $mnpos->idLogger ?>" <?= $is_selected ? 'selected' : '' ?>><?= str_replace('_', ' ', $mnpos->namaPos) ?>
 												</option>
 											<?php endforeach ?>
 										</select>

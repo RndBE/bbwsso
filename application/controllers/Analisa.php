@@ -3,12 +3,37 @@
 
 class Analisa extends CI_Controller
 {
+	// Logger yang di-split jadi beberapa entitas (selaras dengan Beranda.php)
+	private $split_loggers = [
+		'10247' => [
+			'371' => ['nama' => 'Pos AWLR Carik Barat', 'params' => ['371', '330', '331', '332', '329']],
+			'372' => ['nama' => 'Pos AWLR Sungai Bogowonto', 'params' => ['372', '330', '331', '332', '374']],
+		],
+	];
 
 	function __construct()
 	{
 		parent::__construct();
 
 		$this->load->model('m_analisa');
+	}
+
+	private function _split_grup($id_logger, $grup)
+	{
+		return isset($this->split_loggers[$id_logger][$grup]) ? $this->split_loggers[$id_logger][$grup] : null;
+	}
+
+	// Tebak grup dari id_param; null kalau param shared (ada di lebih dari satu grup)
+	private function _infer_grup($id_logger, $id_param)
+	{
+		if (!isset($this->split_loggers[$id_logger]))
+			return null;
+		$cocok = [];
+		foreach ($this->split_loggers[$id_logger] as $grup => $def) {
+			if (in_array((string) $id_param, $def['params'], true))
+				$cocok[] = $grup;
+		}
+		return count($cocok) === 1 ? $cocok[0] : null;
 	}
 
 
@@ -289,10 +314,20 @@ class Analisa extends CI_Controller
 			$q_pos = $this->db->query("SELECT * FROM t_logger INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi  order by id_logger asc");
 		}
 		foreach ($q_pos->result() as $pos) {
-			$data[] = array(
-				'idLogger' => $pos->id_logger . '_' . 'bbws',
-				'namaPos' => $pos->nama_lokasi
-			);
+			if (isset($this->split_loggers[$pos->id_logger])) {
+				// Logger split tampil sebagai entitas terpisah (selaras beranda)
+				foreach ($this->split_loggers[$pos->id_logger] as $grup => $def) {
+					$data[] = array(
+						'idLogger' => $pos->id_logger . '_bbws_' . $grup,
+						'namaPos' => $def['nama']
+					);
+				}
+			} else {
+				$data[] = array(
+					'idLogger' => $pos->id_logger . '_' . 'bbws',
+					'namaPos' => $pos->nama_lokasi
+				);
+			}
 		}
 		$data_bbws = json_encode($data);
 		$data_psda = json_decode(file_get_contents('https://dpupesdm.monitoring4system.com/integrasi/api_pilihpos'));
@@ -332,8 +367,14 @@ class Analisa extends CI_Controller
 		if ($aset == 'bbws') {
 			$param_data = $this->db->join('t_logger', 't_logger.id_logger = parameter_sensor.logger_id')->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')->where('parameter_sensor.id_param', $idparam)->get('parameter_sensor')->row();
 
+			// Grup split (mis. 10247 → Carik Barat / Sungai Bogowonto)
+			$grup = $this->input->get('grp');
+			if (!$grup || !$this->_split_grup($param_data->logger_id, $grup)) {
+				$grup = $this->_infer_grup($param_data->logger_id, $id_param_only);
+			}
+
 			$params = [
-				'idlogger' => $param_data->logger_id . '_' . $aset,
+				'idlogger' => $param_data->logger_id . '_' . $aset . ($grup ? '_' . $grup : ''),
 				'id_param' => $id_param_only,
 				'data' => 'hari',
 				'pada' => date('Y-m-d'),
@@ -359,10 +400,16 @@ class Analisa extends CI_Controller
 
 	private function _param_belongs_to_logger($id_param, $id_logger)
 	{
-		$logger_id = explode('_', $id_logger)[0];
-		$aset = explode('_', $id_logger)[1];
+		$gabungan = explode('_', $id_logger);
+		$logger_id = $gabungan[0];
+		$aset = isset($gabungan[1]) ? $gabungan[1] : null;
+		$grup = isset($gabungan[2]) ? $gabungan[2] : null;
 
 		if ($aset == 'bbws') {
+			$grupDef = $grup ? $this->_split_grup($logger_id, $grup) : null;
+			if ($grupDef && !in_array((string) $id_param, $grupDef['params'], true)) {
+				return false;
+			}
 			return (bool) $this->db->where('id_param', $id_param)
 				->where('logger_id', $logger_id)
 				->count_all_results('parameter_sensor');
@@ -375,9 +422,15 @@ class Analisa extends CI_Controller
 
 	private function _get_default_param_for_logger($id_logger)
 	{
-		$logger_id = explode('_', $id_logger)[0];
-		$aset = explode('_', $id_logger)[1];
+		$gabungan = explode('_', $id_logger);
+		$logger_id = $gabungan[0];
+		$aset = isset($gabungan[1]) ? $gabungan[1] : null;
+		$grup = isset($gabungan[2]) ? $gabungan[2] : null;
 		if ($aset == 'bbws') {
+			$grupDef = $grup ? $this->_split_grup($logger_id, $grup) : null;
+			if ($grupDef) {
+				return $grupDef['params'][0]; // param utama grup
+			}
 			$row = $this->db->where('logger_id', $logger_id)
 				->order_by('id_param', 'ASC')
 				->limit(1)
@@ -807,6 +860,7 @@ class Analisa extends CI_Controller
 
 		$idLogger = $gabungan[0];
 		$aset = $gabungan[1];
+		$grup = isset($gabungan[2]) ? $gabungan[2] : null;
 
 		$idParam = isset($dec['id_param']) ? trim($dec['id_param']) : null;
 		$modeData = isset($dec['data']) ? trim($dec['data']) : null;
@@ -835,6 +889,19 @@ class Analisa extends CI_Controller
 				->get('t_logger')->row();
 			if (!$tb_main)
 				show_error('Logger tidak ditemukan');
+
+			// Logger split: pakai nama entitas grup, bukan nama lokasi asli
+			$grupDef = $grup ? $this->_split_grup($idLogger, $grup) : null;
+			if (!$grupDef && $idParam) {
+				$inferred = $this->_infer_grup($idLogger, $idParam);
+				if ($inferred) {
+					$grup = $inferred;
+					$grupDef = $this->_split_grup($idLogger, $grup);
+				}
+			}
+			if ($grupDef) {
+				$tb_main->nama_lokasi = $grupDef['nama'];
+			}
 
 			$foto_pos = $this->db->where('id_logger', $idLogger)->get('foto_pos')->result_array();
 			$riwayat_op = $this->db->where('id_logger', $idLogger)->get('t_riwayat')->result_array();
@@ -1056,7 +1123,20 @@ class Analisa extends CI_Controller
 			$payload['data_op'] = $riwayat_op;
 			$payload['foto_pos'] = $foto_pos ?: [];
 			$payload['pilih_pos'] = $this->pilihpos();
-			$payload['pilih_parameter'] = $this->pilihparameter($idLogger);
+			$pilih_parameter = $this->pilihparameter($idLogger);
+			if ($grupDef) {
+				// Hanya tampilkan parameter milik grup, urut sesuai definisi grup
+				$byId = [];
+				foreach ($pilih_parameter as $p) {
+					$byId[(string) $p->idParameter] = $p;
+				}
+				$pilih_parameter = [];
+				foreach ($grupDef['params'] as $pid) {
+					if (isset($byId[$pid]))
+						$pilih_parameter[] = $byId[$pid];
+				}
+			}
+			$payload['pilih_parameter'] = $pilih_parameter;
 
 			$payload['temp_data'] = [
 				'nama_lokasi' => $tb_main->nama_lokasi,
@@ -1088,6 +1168,7 @@ class Analisa extends CI_Controller
 		}
 		$payload['token'] = $string;
 		$payload['aset'] = $aset;
+		$payload['grup'] = $grup;
 		$payload['konten'] = 'konten/back/analisa_all';
 
 		// Info chunking untuk frontend AJAX (hanya aset bbws yang punya $chunks_plan)

@@ -465,15 +465,22 @@ class Beranda extends CI_Controller
 						$group2_ids = array_merge([$group2Id], $shared, $extra2);
 
 						// Kumpulkan param sesuai grup (hanya yang ada)
+						// link bawa grp supaya halaman analisa tahu entitas split-nya
 						$group1_params = [];
 						foreach ($group1_ids as $pid) {
-							if (isset($byId[$pid]))
-								$group1_params[] = $byId[$pid];
+							if (isset($byId[$pid])) {
+								$p = $byId[$pid];
+								$p['link'] .= '&grp=' . $group1Id;
+								$group1_params[] = $p;
+							}
 						}
 						$group2_params = [];
 						foreach ($group2_ids as $pid) {
-							if (isset($byId[$pid]))
-								$group2_params[] = $byId[$pid];
+							if (isset($byId[$pid])) {
+								$p = $byId[$pid];
+								$p['link'] .= '&grp=' . $group2Id;
+								$group2_params[] = $p;
+							}
 						}
 
 						// Tambahkan entri terpisah sesuai ketersediaan param
@@ -708,15 +715,22 @@ class Beranda extends CI_Controller
 					$group2_ids = array_merge([$group2Id], $shared, $extra2);
 
 					// Kumpulkan param sesuai grup (hanya yang ada)
+					// link bawa grp supaya halaman analisa tahu entitas split-nya
 					$group1_params = [];
 					foreach ($group1_ids as $pid) {
-						if (isset($byId[$pid]))
-							$group1_params[] = $byId[$pid];
+						if (isset($byId[$pid])) {
+							$p = $byId[$pid];
+							$p['link'] .= '&grp=' . $group1Id;
+							$group1_params[] = $p;
+						}
 					}
 					$group2_params = [];
 					foreach ($group2_ids as $pid) {
-						if (isset($byId[$pid]))
-							$group2_params[] = $byId[$pid];
+						if (isset($byId[$pid])) {
+							$p = $byId[$pid];
+							$p['link'] .= '&grp=' . $group2Id;
+							$group2_params[] = $p;
+						}
 					}
 
 					// Tambahkan entri terpisah sesuai ketersediaan param
