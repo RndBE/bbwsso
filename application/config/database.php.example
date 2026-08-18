@@ -75,10 +75,10 @@ $query_builder = TRUE;
 
 $db['default'] = array(
 	'dsn'	=> '',
-	'hostname' => '72.60.78.159',
-	'username' => 'admin_bbwsso',
-	'password' => 'gantengbanget',
-	'database' => 'db_bbwsso',
+	'hostname' => 'localhost',
+	'username' => 'ISI_USERNAME',
+	'password' => 'ISI_PASSWORD',
+	'database' => 'ISI_NAMA_DATABASE',
 	'dbdriver' => 'mysqli',
 	'dbprefix' => '',
 	'pconnect' => FALSE,

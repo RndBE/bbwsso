@@ -18,6 +18,7 @@ user_guide_src/cilexer/pycilexer.egg-info/*
 
 # Config sensitif — isi manual di server, jangan di-commit
 application/config/openai.php
+application/config/database.php
 
 # IDE Files
 #-------------------------
