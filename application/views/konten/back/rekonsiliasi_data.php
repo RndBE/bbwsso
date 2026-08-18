@@ -3,8 +3,12 @@
 // Menit kosong diambil dari database, lalu diminta ulang ke logger
 // dengan REQ_DATA (lihat dokumen komunikasi MQTT JSON BL1100/BL110).
 // Command lain (REQ_PENDING_CLEAR, REQ_RANGE, RTC, FTP) belum dipakai.
-$idlogger    = $this->session->userdata('idlogger');
-$namalokasi  = $this->session->userdata('namalokasi');
+// $idlogger, $namalokasi dan $kembali dikirim Analisa::rekonsiliasi().
+// Halaman analisa di sini tidak menyimpan pos aktif di sesi — konteksnya
+// ada di token URL — jadi jangan diambil dari session->userdata().
+$idlogger   = isset($idlogger) ? $idlogger : '';
+$namalokasi = isset($namalokasi) ? $namalokasi : '';
+$kembali    = isset($kembali) && $kembali ? $kembali : 'analisa';
 $mqtt_broker = 'mqtt.beacontelemetry.com';
 $topik_cmd   = 'sub_' . $idlogger;
 $topik_resp  = 'pub_' . $idlogger;
@@ -131,7 +135,7 @@ $hari_ini    = date('Y-m-d');
 	<div class="container-xl">
 		<div class="row g-3 align-items-center">
 			<div class="col-auto">
-				<?= anchor('awlr/analisa', '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-arrow-big-left-lines" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M12 15v3.586a1 1 0 0 1 -1.707 .707l-6.586 -6.586a1 1 0 0 1 0 -1.414l6.586 -6.586a1 1 0 0 1 1.707 .707v3.586h3v6h-3z"></path><path d="M21 15v-6"></path><path d="M18 15v-6"></path></svg>') ?>
+				<?= anchor($kembali, '<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-arrow-big-left-lines" width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M12 15v3.586a1 1 0 0 1 -1.707 .707l-6.586 -6.586a1 1 0 0 1 0 -1.414l6.586 -6.586a1 1 0 0 1 1.707 .707v3.586h3v6h-3z"></path><path d="M21 15v-6"></path><path d="M18 15v-6"></path></svg>') ?>
 			</div>
 			<div class="col-auto">
 				<span class="status-indicator status-secondary status-indicator-animated" id="rekon-indicator">
@@ -296,7 +300,8 @@ $hari_ini    = date('Y-m-d');
 		var MQTTport = 8083;
 		var topikCmd = <?= json_encode($topik_cmd) ?>;
 		var topikResp = <?= json_encode($topik_resp) ?>;
-		var urlMenit = <?= json_encode(base_url('awlr/rekonsiliasi_menit')) ?>;
+		var urlMenit = <?= json_encode(base_url('analisa/rekonsiliasi_menit')) ?>;
+		var idLogger = <?= json_encode((string) $idlogger) ?>;
 		var hariIni = <?= json_encode($hari_ini) ?>;
 
 		var BATAS_DATA = 25000;   // ms menunggu satu REQ_DATA
@@ -459,7 +464,7 @@ $hari_ini    = date('Y-m-d');
 				url: urlMenit,
 				type: 'GET',
 				dataType: 'json',
-				data: { tanggal: tgl },
+				data: { tanggal: tgl, logger: idLogger },
 				success: function (res) {
 					if (!res || res.status !== 'ok') {
 						tulisLog('Gagal memuat data ' + tgl);

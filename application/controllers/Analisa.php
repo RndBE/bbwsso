@@ -1603,4 +1603,125 @@ class Analisa extends CI_Controller
 
 		redirect($controller . '/set_sensorselect/' . $idlogger . '/' . $tabel);
 	}
+
+	### Rekonsiliasi data logger #########################################
+	# Peta kelengkapan data per menit + tarik ulang data dari logger.
+	# Id logger diambil dari URL, bukan sesi: halaman analisa di sini
+	# menyimpan konteks pos di token URL, bukan di session.
+
+	private $rekon_logger = array(
+		'10051',    // Pos AWLR Butuh
+	);
+
+	private function _rekon_boleh($idlogger)
+	{
+		return in_array((string) $idlogger, $this->rekon_logger, TRUE);
+	}
+
+	# Tabel data ditentukan t_logger.tabel_main (awlr, awlr2, … awlr5),
+	# salah tabel bikin satu hari penuh terbaca kosong.
+	private function _rekon_tabel($idlogger)
+	{
+		$row = $this->db
+			->select('tabel_main')
+			->where('id_logger', $idlogger)
+			->get('t_logger')
+			->row();
+
+		if (!$row or !preg_match('/^[a-z0-9_]+$/i', (string) $row->tabel_main)) {
+			return NULL;
+		}
+
+		return $this->db->table_exists($row->tabel_main) ? $row->tabel_main : NULL;
+	}
+
+	public function rekonsiliasi($idlogger = '')
+	{
+		if (!$this->session->userdata('logged_in')) {
+			redirect('login');
+			return;
+		}
+		if (!$this->_rekon_boleh($idlogger)) {
+			show_404();
+			return;
+		}
+
+		$pos = $this->db
+			->select('t_lokasi.nama_lokasi')
+			->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
+			->where('t_logger.id_logger', $idlogger)
+			->get('t_logger')
+			->row();
+
+		$token = (string) $this->input->get('token');
+
+		$data = array(
+			'idlogger'   => (string) $idlogger,
+			'namalokasi' => $pos ? $pos->nama_lokasi : ('Logger ' . $idlogger),
+			'kembali'    => $token !== '' ? 'analisa/data/' . rawurlencode($token) : 'analisa',
+			'konten'     => 'konten/back/rekonsiliasi_data',
+		);
+
+		$this->load->view('template_admin/site', $data);
+	}
+
+	# Menit mana saja yang sudah ada datanya pada satu tanggal.
+	# Sengaja memakai rentang waktu pada kolom yang terindeks — jangan
+	# dibungkus DATE_FORMAT/DATE, karena tabelnya jutaan baris dan fungsi
+	# di sisi kolom bikin indeks tidak kepakai (full scan).
+	public function rekonsiliasi_menit()
+	{
+		$this->output->set_content_type('application/json');
+
+		$idlogger = (string) $this->input->get('logger');
+		if (!$this->session->userdata('logged_in') or !$this->_rekon_boleh($idlogger)) {
+			$this->output
+				->set_status_header(403)
+				->set_output(json_encode(array('status' => 'error', 'message' => 'Pos tidak diizinkan')));
+			return;
+		}
+
+		$tabel = $this->_rekon_tabel($idlogger);
+		if (!$tabel) {
+			$this->output
+				->set_status_header(500)
+				->set_output(json_encode(array('status' => 'error', 'message' => 'Tabel data tidak ditemukan')));
+			return;
+		}
+
+		$tanggal = (string) $this->input->get('tanggal');
+		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $tanggal) or !strtotime($tanggal)) {
+			$tanggal = date('Y-m-d');
+		}
+		if ($tanggal > date('Y-m-d')) {
+			$tanggal = date('Y-m-d');
+		}
+
+		$this->db->select('waktu');
+		$this->db->where('code_logger', $idlogger);
+		$this->db->where('waktu >=', $tanggal . ' 00:00:00');
+		$this->db->where('waktu <', date('Y-m-d', strtotime($tanggal . ' +1 day')) . ' 00:00:00');
+		$rows = $this->db->get($tabel)->result();
+
+		$ada = array();
+		foreach ($rows as $row) {
+			$jam = (int) substr($row->waktu, 11, 2);
+			$mnt = (int) substr($row->waktu, 14, 2);
+			$ada[$jam * 60 + $mnt] = TRUE;
+		}
+		ksort($ada);
+
+		// Hari berjalan hanya dihitung sampai menit sekarang
+		$harapan = 1440;
+		if ($tanggal === date('Y-m-d')) {
+			$harapan = ((int) date('G') * 60) + (int) date('i') + 1;
+		}
+
+		$this->output->set_output(json_encode(array(
+			'status'  => 'ok',
+			'tanggal' => $tanggal,
+			'harapan' => $harapan,
+			'ada'     => array_keys($ada),
+		)));
+	}
 }

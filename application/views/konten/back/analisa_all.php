@@ -283,6 +283,24 @@ $namafile = ($data_sensor->mode_data === 'range') ? ($temp_data['nama_lokasi'] .
 								Skema Perangkat
 							</button>
 						<?php } ?>
+						<?php
+						// Rekonsiliasi data — daftar pos ada di Analisa::$rekon_logger.
+						// Hanya aset lokal (bbws); pos PSDA datanya ditarik dari sistem lain.
+						if ($aset === 'bbws' && in_array((string) $idLogger, array('10051'), true)) { ?>
+							<a class="btn me-2 text-nowrap"
+								href="<?= base_url('analisa/rekonsiliasi/' . rawurlencode($idLogger)) ?>?token=<?= rawurlencode($token) ?>">
+								<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-checklist"
+									width="24" height="24" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"
+									fill="none" stroke-linecap="round" stroke-linejoin="round">
+									<path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
+									<path d="M9.615 20h-2.615a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8"></path>
+									<path d="M14 19l2 2l4 -4"></path>
+									<path d="M9 8h4"></path>
+									<path d="M9 12h2"></path>
+								</svg>
+								Rekonsiliasi Data
+							</a>
+						<?php } ?>
 						<a class="btn w-100" data-bs-toggle="offcanvas" href="#offcanvasEnd" role="button"
 							aria-controls="offcanvasEnd">
 							<svg xmlns="http://www.w3.org/2000/svg" class="icon icon-tabler icon-tabler-file-info"
