@@ -11,7 +11,7 @@ Dokumen ini menjelaskan **cara kerja** chatbot AI pada sistem monitoring BBWS Se
 | Nama | SobatSO / Copilot |
 | Tujuan | Asisten tanya-jawab data monitoring (hujan, TMA, debit, cuaca, status pos) |
 | Wilayah | Jawa Tengah & D.I. Yogyakarta (DAS Serayu, Opak, Oyo, Progo, dll.) |
-| Model AI | DeepSeek `deepseek-v4-flash` (function calling, endpoint OpenAI-compatible) |
+| Model AI | Lewat gateway **9router** di server yang sama (`http://127.0.0.1:20128/api/v1`), combo `Chatbot` → `ds/deepseek-v4-flash` + fallback `cx/gpt-5.6-terra`. Endpoint OpenAI-compatible, function calling didukung kedua anggota combo. |
 | Speech-to-Text | OpenAI Whisper (`whisper-1`, bahasa `id`) — tetap OpenAI, DeepSeek tidak punya STT |
 | Framework | CodeIgniter (PHP) |
 | Penyimpanan sesi | File JSON di `application/cache/copilot_sessions/` |
@@ -81,6 +81,8 @@ Referensi: [Chatbot.php:48-180](application/controllers/Chatbot.php#L48-L180)
 10. **Kembalikan reply** (markdown) + `_debug` (jejak tool yang dipanggil).
 
 Pengaman:
+- `stream => false` **wajib** dikirim eksplisit. 9router menempelkan terminator SSE `data: [DONE]` di belakang objek JSON kalau `stream` tidak disebut, dan `json_decode()` gagal total — gejalanya "Gagal menghubungi DeepSeek API" padahal HTTP 200.
+- Body non-JSON dikembalikan sebagai `_error` berisi cuplikan body, bukan `null`, supaya sambungan sukses tidak terbaca sebagai gagal sambung.
 - `set_time_limit(300)` agar tidak timeout saat query berat.
 - `register_shutdown_function` menangkap fatal error PHP agar response tidak pernah kosong.
 - Output buffer dibersihkan sebelum mengirim JSON agar warning PHP tidak bocor.
@@ -256,7 +258,7 @@ Nama tabel & kolom yang berasal dari DB divalidasi `_aman_identifier()` sebelum 
 4. **Maks. ±20 pesan** riwayat yang dibawa (sisanya dipangkas).
 5. Data historis disarankan dalam rentang wajar (hindari rentang sangat panjang demi token).
 5b. Belum ada tool untuk: riwayat perbaikan (`t_riwayat`), garansi/kontrak fleet-wide (`t_garansi`), rating curve (`rumus_rating_curve`, `datasheet_debit`), piezometer (`t_piezometer`), config notifikasi (`notifikasi`), query geospasial radius/hulu-hilir, dan perbandingan antar-periode (bulan ini vs bulan lalu).
-6. Bergantung pada **DeepSeek API** (butuh koneksi & API key valid); Whisper masih butuh key OpenAI terpisah.
+6. Bergantung pada **gateway 9router** (`systemd 9router`, loopback 20128) yang meneruskan ke DeepSeek/OpenAI (butuh koneksi & API key valid); Whisper masih butuh key OpenAI terpisah.
 7. Transkripsi suara: bahasa **Indonesia**, format audio terbatas (mp3, mp4, m4a, wav, webm, ogg, mpeg).
 
 ---
@@ -266,10 +268,14 @@ Nama tabel & kolom yang berasal dari DB divalidasi `_aman_identifier()` sebelum 
 `application/config/openai.php`:
 
 ```php
-// Chat / function calling → DeepSeek
-$config['deepseek_api_key']  = 'sk-...';                    // API key DeepSeek (wajib)
-$config['deepseek_model']    = 'deepseek-v4-flash';         // opsional, default deepseek-v4-flash
-$config['deepseek_base_url'] = 'https://api.deepseek.com';  // opsional, default sama
+// Chat / function calling → gateway 9router di server ini
+$config['deepseek_api_key']  = 'sk-...';                          // kunci API 9router (BUKAN kunci DeepSeek)
+$config['deepseek_model']    = 'Chatbot';                         // combo 9router; atau 'ds/deepseek-v4-flash' langsung
+$config['deepseek_base_url'] = 'http://127.0.0.1:20128/api/v1';   // loopback: lewati Cloudflare + nginx + TLS
+
+// Tanpa gateway, DeepSeek langsung juga jalan:
+// $config['deepseek_model']    = 'deepseek-v4-flash';
+// $config['deepseek_base_url'] = 'https://api.deepseek.com';
 
 // Speech-to-text (/chatbot/transcribe) → masih OpenAI Whisper
 $config['openai_api_key'] = 'sk-...';  // hanya dipakai transcribe(); kosongkan bila fitur suara tidak dipakai

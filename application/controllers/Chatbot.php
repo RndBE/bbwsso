@@ -1020,6 +1020,10 @@ class Chatbot extends CI_Controller
             'tools' => $tools,
             'tool_choice' => 'auto',
             'max_tokens' => 4096,
+            // Wajib eksplisit. Tanpa ini gateway 9router menempelkan
+            // terminator SSE "data: [DONE]" di belakang objek JSON dan
+            // json_decode() gagal total.
+            'stream' => false,
         ];
 
         $ch = curl_init($base_url . '/chat/completions');
@@ -1049,6 +1053,15 @@ class Chatbot extends CI_Controller
         log_message('debug', 'DeepSeek HTTP ' . $http_code . ' response: ' . substr($response, 0, 500));
 
         $decoded = json_decode($response, true);
+
+        // Body bukan JSON: laporkan potongannya. Memulangkan null bikin
+        // pemanggil cuma bisa bilang "gagal menghubungi" padahal
+        // sambungannya sukses — menyesatkan saat menelusuri masalah.
+        if (!is_array($decoded)) {
+            $cuplikan = mb_substr(trim((string) $response), 0, 300);
+            log_message('error', 'LLM respons bukan JSON (HTTP ' . $http_code . '): ' . $cuplikan);
+            return ['_error' => 'Respons LLM bukan JSON (HTTP ' . $http_code . '): ' . $cuplikan];
+        }
 
         if (isset($decoded['error'])) {
             $err_msg = $decoded['error']['message'] ?? json_encode($decoded['error']);
