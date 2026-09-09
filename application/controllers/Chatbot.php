@@ -12,6 +12,7 @@ class Chatbot extends CI_Controller
         $this->load->model('m_analisa');
         $this->config->load('openai', TRUE);
         $this->load->library('DateResolver');
+        $this->load->library('siaga');
     }
 
     // ─── Helper: read JSON body (supports internal fake input) ───
@@ -77,12 +78,12 @@ class Chatbot extends CI_Controller
             return $this->_json_response(['status' => 'error', 'message' => 'Pesan tidak boleh kosong']);
         }
 
-        $api_key = $this->config->item('openai_api_key', 'openai');
+        $api_key = $this->config->item('deepseek_api_key', 'openai');
         if (empty($api_key)) {
-            return $this->_json_response(['status' => 'error', 'message' => 'API key OpenAI belum dikonfigurasi']);
+            return $this->_json_response(['status' => 'error', 'message' => 'API key DeepSeek belum dikonfigurasi']);
         }
 
-        $model = $this->config->item('openai_model', 'openai') ?: 'gpt-4o-mini';
+        $model = $this->config->item('deepseek_model', 'openai') ?: 'deepseek-v4-flash';
 
         // ── Load or create session ──
         if (!$sid) {
@@ -108,10 +109,10 @@ class Chatbot extends CI_Controller
         $tools = $this->_openai_tools();
 
         // ── First API call ──
-        $response = $this->_call_openai($api_key, $model, $messages, $tools);
+        $response = $this->_call_llm($api_key, $model, $messages, $tools);
 
         if (!$response || isset($response['_error'])) {
-            $err_detail = isset($response['_error']) ? $response['_error'] : 'Gagal menghubungi OpenAI API';
+            $err_detail = isset($response['_error']) ? $response['_error'] : 'Gagal menghubungi DeepSeek API';
             http_response_code(500);
             return $this->_json_response(['status' => 'error', 'message' => $err_detail]);
         }
@@ -148,11 +149,11 @@ class Chatbot extends CI_Controller
                 ];
             }
 
-            // Call OpenAI again with tool results
-            $response = $this->_call_openai($api_key, $model, $messages, $tools);
+            // Call DeepSeek again with tool results
+            $response = $this->_call_llm($api_key, $model, $messages, $tools);
 
             if (!$response || isset($response['_error'])) {
-                $err_detail = isset($response['_error']) ? $response['_error'] : 'Gagal menghubungi OpenAI API';
+                $err_detail = isset($response['_error']) ? $response['_error'] : 'Gagal menghubungi DeepSeek API';
                 http_response_code(500);
                 return $this->_json_response(['status' => 'error', 'message' => $err_detail]);
             }
@@ -216,7 +217,7 @@ class Chatbot extends CI_Controller
         }
 
         // Cek API key
-        $api_key = $this->config->item('openai_api_key', 'openai');
+        $api_key = $this->config->item('deepseek_api_key', 'openai');
         if (empty($api_key)) {
             http_response_code(503);
             return $this->_json_response([
@@ -225,7 +226,7 @@ class Chatbot extends CI_Controller
             ]);
         }
 
-        $model = $this->config->item('openai_model', 'openai') ?: 'gpt-4o-mini';
+        $model = $this->config->item('deepseek_model', 'openai') ?: 'deepseek-v4-flash';
 
         // ── Gunakan uuid sebagai session_id ──
         $sid = 'ext_' . $uuid;
@@ -243,7 +244,7 @@ class Chatbot extends CI_Controller
         $tools = $this->_openai_tools();
 
         // ── First API call ──
-        $response = $this->_call_openai($api_key, $model, $messages, $tools);
+        $response = $this->_call_llm($api_key, $model, $messages, $tools);
 
         if (!$response || isset($response['_error'])) {
             http_response_code(502);
@@ -276,7 +277,7 @@ class Chatbot extends CI_Controller
                 ];
             }
 
-            $response = $this->_call_openai($api_key, $model, $messages, $tools);
+            $response = $this->_call_llm($api_key, $model, $messages, $tools);
 
             if (!$response || isset($response['_error'])) {
                 http_response_code(502);
@@ -486,6 +487,21 @@ class Chatbot extends CI_Controller
             . "- Jika user tanya tentang CURAH HUJAN HISTORIS di SEMUA pos pada tanggal tertentu → gunakan cek_hujan_historis.\n"
             . "- Jika user tanya tentang TMA/debit → gunakan search_logger(keyword='awlr') atau search_logger(keyword='TMA') untuk cari pos AWLR.\n"
             . "- JANGAN PERNAH loop panggil get_data_ringkasan untuk semua pos → token akan habis!\n\n"
+            . "PERTANYAAN LINTAS SEMUA POS — PAKAI TOOL AGREGASI, JANGAN LOOP:\n"
+            . "- Peringkat/terbesar/terkecil/total/rata-rata lintas pos (mis. '10 pos hujan tertinggi bulan ini', 'pos mana TMA tertinggi minggu ini', 'total hujan per DAS', 'pos paling kering') → get_ranking. SATU panggilan, agregasi sudah dihitung database.\n"
+            . "- Status bahaya/siaga/waspada/banjir pos AWLR → get_status_siaga. WAJIB. Ambang tiap pos berbeda dan disimpan admin; JANGAN menilai sendiri apakah angka TMA berbahaya, dan JANGAN mengarang ambang.\n"
+            . "- Pos berstatus 'Tidak diatur' pada get_status_siaga berarti ambangnya BELUM diisi admin. Sampaikan apa adanya, JANGAN dilaporkan sebagai aman.\n"
+            . "- Data telat/bolong/tidak lengkap, pos belum kirim data, pos offline/bermasalah, baterai lemah → get_kesehatan_pos.\n"
+            . "- get_logger_koneksi hanya untuk status koneksi 1 pos. Untuk kondisi BANYAK pos gunakan get_kesehatan_pos.\n"
+            . "- Ketiga tool ini menerima filter das dan kategori, jadi 'pos AWLR di DAS Opak' cukup satu panggilan.\n\n"
+            . "CAKUPAN POS BBWS vs PSDA (WAJIB JUJUR):\n"
+            . "- Sistem ini memuat pos milik BBWS Serayu Opak DAN pos titipan DPUPESDM DIY (PSDA).\n"
+            . "- get_ranking dan get_kesehatan_pos SUDAH menggabungkan pos PSDA. Setiap response punya field cakupan dengan pos_psda_termasuk dan pos_psda_tidak_termasuk.\n"
+            . "- Bila cakupan.pos_psda_tidak_termasuk lebih dari 0, WAJIB sebutkan di jawaban beserta alasannya dari cakupan.keterangan. JANGAN menyajikannya seolah seluruh pos.\n"
+            . "- get_ranking hanya bisa menggabungkan pos PSDA untuk parameter HUJAN dan TMA (PSDA hanya membuka rekap parameter utama). Untuk suhu/angin/kelembapan/debit, pos PSDA tidak ikut.\n"
+            . "- Baris hasil punya field sumber (BBWS atau PSDA). Bila user tanya asal pos, pakai field itu.\n"
+            . "- get_status_siaga HANYA pos BBWS: pos PSDA tidak punya ambang siaga di sistem ini. Bila user tanya siaga pos PSDA, jelaskan ambangnya belum dikonfigurasi, jangan mengarang.\n"
+            . "- cek_hujan dan cek_hujan_historis juga sudah mencakup pos PSDA.\n\n"
             . "Konteks waktu saat ini:\n"
             . "- Sekarang: {$now} ({$hari})\n"
             . "- Hari ini: " . date('Y-m-d') . "\n"
@@ -829,6 +845,98 @@ class Chatbot extends CI_Controller
                         'required' => ['loggers']
                     ]
                 ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_status_siaga',
+                    'description' => 'Mengecek TINGKAT SIAGA / status bahaya banjir pos AWLR BBWS Serayu Opak (pos PSDA/DPUPESDM DIY tidak punya ambang siaga di sistem ini): membandingkan TMA terkini dengan ambang siaga (Waspada/Siaga/Awas) yang diatur admin per pos. WAJIB dipakai untuk pertanyaan seperti "pos mana yang siaga sekarang", "apakah TMA pos X sudah lewat ambang waspada", "berapa ambang siaga pos Y", "ada pos yang bahaya", "status banjir". JANGAN menyimpulkan bahaya/aman dari angka TMA sendiri tanpa tool ini — ambang berbeda tiap pos.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id_logger' => [
+                                'type' => 'string',
+                                'description' => 'Opsional. Kosongkan untuk mengecek SEMUA pos AWLR sekaligus. Isi bila user tanya 1 pos tertentu (hasilnya termasuk daftar ambang lengkap).'
+                            ],
+                            'das' => [
+                                'type' => 'string',
+                                'description' => 'Opsional: batasi ke satu DAS, contoh "Opak", "Serayu", "Progo".'
+                            ],
+                            'filter' => [
+                                'type' => 'string',
+                                'enum' => ['semua', 'bahaya_saja'],
+                                'description' => 'Default "semua". Pakai "bahaya_saja" bila user hanya minta pos yang sedang melampaui ambang.'
+                            ]
+                        ],
+                        'required' => []
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_ranking',
+                    'description' => 'PERINGKAT / AGREGASI LINTAS SEMUA POS untuk satu parameter pada satu rentang waktu. Agregasi dihitung di database, jadi ini SATU panggilan untuk semua pos. WAJIB dipakai (bukan loop get_data_ringkasan) untuk pertanyaan seperti "10 pos hujan tertinggi bulan ini", "pos mana TMA paling tinggi minggu ini", "total hujan per DAS", "pos paling kering", "rata-rata hujan semua pos". Hasilnya juga memuat total & rata-rata seluruh pos. Mencakup pos BBWS + pos PSDA/DPUPESDM DIY untuk parameter hujan dan TMA; parameter lain hanya pos BBWS. Cek field cakupan pada response.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'parameter' => [
+                                'type' => 'string',
+                                'description' => 'Nama parameter: "hujan", "tma", "debit", "suhu", "kelembapan", "angin", dll. Default "hujan".'
+                            ],
+                            'tanggal' => ['type' => 'string', 'description' => 'Mode 1 hari (YYYY-MM-DD).'],
+                            'start' => ['type' => 'string', 'description' => 'Mode rentang: tanggal awal (YYYY-MM-DD). Pakai resolve_date dulu bila user menyebut waktu relatif.'],
+                            'end' => ['type' => 'string', 'description' => 'Mode rentang: tanggal akhir (YYYY-MM-DD).'],
+                            'bulan' => ['type' => 'string', 'description' => 'Mode bulanan (YYYY-MM).'],
+                            'agregasi' => [
+                                'type' => 'string',
+                                'enum' => ['auto', 'total', 'max', 'min', 'rata'],
+                                'description' => 'Default "auto": akumulasi (total) untuk hujan, maksimum untuk TMA/suhu/dll.'
+                            ],
+                            'urut' => [
+                                'type' => 'string',
+                                'enum' => ['desc', 'asc'],
+                                'description' => 'Default "desc" (tertinggi dulu). Pakai "asc" untuk terendah/paling kering.'
+                            ],
+                            'kategori' => [
+                                'type' => 'string',
+                                'description' => 'Opsional batasi kategori: "arr", "aws"/"awr", "awlr", "afmr", "klimatologi". Kosongkan agar ditebak dari parameter.'
+                            ],
+                            'das' => ['type' => 'string', 'description' => 'Opsional: batasi ke satu DAS.'],
+                            'limit' => ['type' => 'integer', 'description' => 'Jumlah pos yang ditampilkan, default 10, maksimal 50.'],
+                            'sertakan_psda' => ['type' => 'boolean', 'description' => 'Default true: pos DPUPESDM DIY ikut dihitung bila parameternya hujan/TMA dan rentang <= 31 hari. Set false hanya bila user minta khusus pos BBWS saja.']
+                        ],
+                        'required' => []
+                    ]
+                ]
+            ],
+            [
+                'type' => 'function',
+                'function' => [
+                    'name' => 'get_kesehatan_pos',
+                    'description' => 'KESEHATAN & KELENGKAPAN DATA pos: status koneksi, kapan data terakhir masuk, berapa jam data kosong, persen kelengkapan, status perbaikan, dan nilai baterai bila ada sensornya. Dipakai untuk pertanyaan seperti "pos mana yang belum kirim data hari ini", "data pos X bolong berapa jam", "kelengkapan data bulan ini berapa persen", "pos mana yang bermasalah/offline", "pos mana baterainya lemah". Satu panggilan mencakup semua pos BBWS + pos PSDA/DPUPESDM DIY. Cek field cakupan pada response.',
+                    'parameters' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'id_logger' => ['type' => 'string', 'description' => 'Opsional: satu pos saja. Kosongkan untuk seluruh pos.'],
+                            'tanggal' => ['type' => 'string', 'description' => 'Periode 1 hari (YYYY-MM-DD). Default hari ini.'],
+                            'start' => ['type' => 'string', 'description' => 'Periode rentang: awal (YYYY-MM-DD), maksimal 31 hari.'],
+                            'end' => ['type' => 'string', 'description' => 'Periode rentang: akhir (YYYY-MM-DD).'],
+                            'bulan' => ['type' => 'string', 'description' => 'Periode bulanan (YYYY-MM).'],
+                            'kategori' => ['type' => 'string', 'description' => 'Opsional: "arr", "aws"/"awr", "awlr", "afmr", "klimatologi".'],
+                            'das' => ['type' => 'string', 'description' => 'Opsional: batasi ke satu DAS.'],
+                            'filter' => [
+                                'type' => 'string',
+                                'enum' => ['bermasalah', 'semua'],
+                                'description' => 'Default "bermasalah" (hemat token). Pakai "semua" bila user minta kondisi seluruh pos termasuk yang sehat.'
+                            ],
+                            'batas_kelengkapan' => ['type' => 'number', 'description' => 'Persen minimum agar dianggap lengkap, default 90.'],
+                            'batas_baterai' => ['type' => 'number', 'description' => 'Opsional: ambang tegangan baterai (mis. 11.5). Tanpa ini baterai hanya dilaporkan, tidak ditandai bermasalah.'],
+                            'sertakan_psda' => ['type' => 'boolean', 'description' => 'Default true: pos DPUPESDM DIY ikut. Set false hanya bila user minta khusus pos BBWS saja.']
+                        ],
+                        'required' => []
+                    ]
+                ]
             ]
         ];
     }
@@ -850,6 +958,9 @@ class Chatbot extends CI_Controller
             'get_data_ringkasan' => 'data_ringkasan',
             'get_data_analisa' => 'data_analisa',
             'get_data_komparasi' => 'data_komparasi',
+            'get_status_siaga' => 'status_siaga',
+            'get_ranking' => 'ranking_pos',
+            'get_kesehatan_pos' => 'kesehatan_pos',
         ];
 
         if (!isset($map[$fn_name])) {
@@ -898,21 +1009,24 @@ class Chatbot extends CI_Controller
     // (We need to re-check — the original is already defined above,
     //  so we wrap it in the chat flow using a flag)
 
-    // ─── Call OpenAI Chat Completions API ───
-    private function _call_openai($api_key, $model, $messages, $tools)
+    // ─── Call DeepSeek Chat Completions API (OpenAI-compatible) ───
+    private function _call_llm($api_key, $model, $messages, $tools)
     {
+        $base_url = rtrim($this->config->item('deepseek_base_url', 'openai') ?: 'https://api.deepseek.com', '/');
+
         $payload = [
             'model' => $model,
             'messages' => $messages,
             'tools' => $tools,
-            'max_completion_tokens' => 4096,
+            'tool_choice' => 'auto',
+            'max_tokens' => 4096,
         ];
 
-        $ch = curl_init('https://api.openai.com/v1/chat/completions');
+        $ch = curl_init($base_url . '/chat/completions');
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_TIMEOUT => 60,
+            CURLOPT_TIMEOUT => 120,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
@@ -927,25 +1041,25 @@ class Chatbot extends CI_Controller
         curl_close($ch);
 
         if ($err) {
-            log_message('error', 'OpenAI cURL error: ' . $err);
+            log_message('error', 'DeepSeek cURL error: ' . $err);
             // Return error with detail so chat() can show it
             return ['_error' => 'cURL error: ' . $err];
         }
 
-        log_message('debug', 'OpenAI HTTP ' . $http_code . ' response: ' . substr($response, 0, 500));
+        log_message('debug', 'DeepSeek HTTP ' . $http_code . ' response: ' . substr($response, 0, 500));
 
         $decoded = json_decode($response, true);
 
         if (isset($decoded['error'])) {
             $err_msg = $decoded['error']['message'] ?? json_encode($decoded['error']);
-            log_message('error', 'OpenAI API error (HTTP ' . $http_code . '): ' . $err_msg);
-            return ['_error' => 'OpenAI: ' . $err_msg];
+            log_message('error', 'DeepSeek API error (HTTP ' . $http_code . '): ' . $err_msg);
+            return ['_error' => 'DeepSeek: ' . $err_msg];
         }
 
         // Detect truncated response (finish_reason == 'length')
         $finish_reason = $decoded['choices'][0]['finish_reason'] ?? null;
         if ($finish_reason === 'length') {
-            log_message('warning', 'OpenAI response truncated (finish_reason=length)');
+            log_message('warning', 'DeepSeek response truncated (finish_reason=length)');
             // Still return the partial response — let chat() handle it
             // The content may be incomplete but at least won't crash
         }
@@ -1846,25 +1960,7 @@ class Chatbot extends CI_Controller
         // Filter parameters if specified
         if ($filter_param) {
             // Synonym map: Indonesian ↔ English parameter names
-            $synonyms = [
-                'hujan' => ['precipitation', 'rain', 'rainfall', 'curah'],
-                'precipitation' => ['hujan', 'rain', 'rainfall', 'curah'],
-                'rain' => ['hujan', 'precipitation', 'rainfall', 'curah'],
-                'curah' => ['hujan', 'precipitation', 'rain', 'rainfall'],
-                'suhu' => ['temperature', 'temp'],
-                'temperature' => ['suhu', 'temp'],
-                'angin' => ['wind', 'speed'],
-                'wind' => ['angin'],
-                'kelembapan' => ['humidity', 'rh', 'kelembaban'],
-                'humidity' => ['kelembapan', 'rh', 'kelembaban'],
-                'tekanan' => ['pressure', 'barometer'],
-                'pressure' => ['tekanan', 'barometer'],
-                'radiasi' => ['solar', 'radiation', 'matahari'],
-                'solar' => ['radiasi', 'matahari'],
-                'uv' => ['ultraviolet'],
-                'debit' => ['flow', 'discharge'],
-                'tma' => ['water', 'level', 'tinggi', 'muka', 'air'],
-            ];
+            $synonyms = $this->_param_synonyms();
 
             // Split filter into words, then expand with synonyms
             $filter_words = array_filter(
@@ -2802,4 +2898,1105 @@ class Chatbot extends CI_Controller
             'data' => $selected
         ]);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  STATUS SIAGA / RANKING / KESEHATAN POS
+    //  Semua agregasi dikerjakan di SQL, di-batch per tabel data.
+    //  Tujuannya supaya pertanyaan lintas-pos tidak perlu loop
+    //  tool per pos (boros token + rawan timeout).
+    // ═══════════════════════════════════════════════════════════
+
+    private $_rumus_cache = [];
+
+    /** Sinonim nama parameter (ID ↔ EN) — dipakai pencocokan kolom sensor. */
+    private function _param_synonyms()
+    {
+        return [
+            'hujan' => ['precipitation', 'rain', 'rainfall', 'curah'],
+            'precipitation' => ['hujan', 'rain', 'rainfall', 'curah'],
+            'rain' => ['hujan', 'precipitation', 'rainfall', 'curah'],
+            'curah' => ['hujan', 'precipitation', 'rain', 'rainfall'],
+            'suhu' => ['temperature', 'temp'],
+            'temperature' => ['suhu', 'temp'],
+            'angin' => ['wind', 'speed'],
+            'wind' => ['angin'],
+            'kelembapan' => ['humidity', 'rh', 'kelembaban'],
+            'humidity' => ['kelembapan', 'rh', 'kelembaban'],
+            'tekanan' => ['pressure', 'barometer'],
+            'pressure' => ['tekanan', 'barometer'],
+            'radiasi' => ['solar', 'radiation', 'matahari'],
+            'solar' => ['radiasi', 'matahari'],
+            'uv' => ['ultraviolet'],
+            'debit' => ['flow', 'discharge'],
+            'tma' => ['water', 'level', 'tinggi', 'muka', 'air'],
+            'baterai' => ['battery', 'batt', 'voltase', 'voltage', 'tegangan'],
+            'battery' => ['baterai', 'batt', 'voltase', 'voltage', 'tegangan'],
+        ];
+    }
+
+    /**
+     * Jumlah pos DPUPESDM DIY (dari logger_mapping.json) yang TIDAK tercakup
+     * query lokal. Pos PSDA tidak ada di t_logger, jadi setiap agregasi lokal
+     * pasti melewatkannya — harus disebutkan, bukan didiamkan.
+     */
+    private function _jumlah_pos_psda($controllers = [])
+    {
+        // logger_mapping.json cuma snapshot dan bisa basi (pos PSDA bisa
+        // bertambah). Kalau beranda PSDA sudah diambil di request ini, pakai
+        // itu — lebih akurat dan tanpa request tambahan. Kalau belum, jangan
+        // memicu request hanya demi angka penyebut.
+        if ($this->_psda_beranda_cache !== null && !empty($this->_psda_beranda_cache)) {
+            $n = 0;
+            foreach ($this->_psda_beranda_cache as $inf) {
+                if (!empty($controllers) && (!$inf['controller'] || !in_array($inf['controller'], $controllers, true))) {
+                    continue;
+                }
+                $n++;
+            }
+            return $n;
+        }
+
+        // PSDA memakai penamaan kategorinya sendiri: controller 'station_cuaca'
+        // dipakai untuk ARR maupun AWS, dan icon 'ws' = AWS/AWR. Jadi nama
+        // controller PSDA harus diterjemahkan dulu ke controller lokal.
+        $peta_icon = ['awlr' => 'awlr', 'arr' => 'arr', 'ws' => 'awr', 'afmr' => 'afmr'];
+        $peta_kat = ['AWLR' => 'awlr', 'ARR' => 'arr', 'AWS' => 'awr', 'AFMR' => 'afmr'];
+
+        $n = 0;
+        foreach ($this->_load_logger_mapping() as $kunci => $cat) {
+            $kat = strtoupper((string) (isset($cat['nama_kategori']) ? $cat['nama_kategori'] : $kunci));
+            $daftar = isset($cat['logger']) ? $cat['logger'] : [];
+            foreach ($daftar as $l) {
+                if (empty($l['status_aset'])) {
+                    continue; // pos BBWS, sudah ada di DB lokal
+                }
+                $icon = strtolower((string) (isset($l['icon']) ? $l['icon'] : ''));
+                if (isset($peta_icon[$icon])) {
+                    $c = $peta_icon[$icon];
+                } elseif (isset($peta_kat[$kat])) {
+                    $c = $peta_kat[$kat];
+                } else {
+                    $c = null;
+                }
+                if (!empty($controllers) && ($c === null || !in_array($c, $controllers, true))) {
+                    continue;
+                }
+                $n++;
+            }
+        }
+        return $n;
+    }
+
+    // ─── Jembatan ke API PSDA (DPUPESDM DIY) untuk agregasi lintas pos ───
+
+    private $_psda_beranda_cache = null;
+    private $_psda_horizontal_cache = [];
+
+    /** GET dengan timeout. file_get_contents tanpa timeout bisa menggantung chat. */
+    private function _http_get($url, $timeout = 20)
+    {
+        $ctx = stream_context_create([
+            'http' => ['method' => 'GET', 'timeout' => $timeout, 'ignore_errors' => true],
+            'https' => ['method' => 'GET', 'timeout' => $timeout, 'ignore_errors' => true],
+        ]);
+        $out = @file_get_contents($url, false, $ctx);
+        if ($out === false) {
+            log_message('error', 'PSDA GET gagal: ' . $url);
+            return null;
+        }
+        return $out;
+    }
+
+    /** icon PSDA → controller lokal. 'ws' = Stasiun Cuaca = AWS/AWR. */
+    private function _psda_icon_ke_controller($icon)
+    {
+        $peta = ['awlr' => 'awlr', 'arr' => 'arr', 'ws' => 'awr', 'afmr' => 'afmr'];
+        $icon = strtolower((string) $icon);
+        return isset($peta[$icon]) ? $peta[$icon] : null;
+    }
+
+    /**
+     * Satu snapshot integrasi/beranda PSDA: SEMUA pos DPUPESDM DIY beserta
+     * waktu data terakhir, status koneksi, dan nilai terkini tiap parameter.
+     * Satu request untuk seluruh pos, hasilnya dicache per-request.
+     */
+    private function _psda_beranda()
+    {
+        if ($this->_psda_beranda_cache !== null) {
+            return $this->_psda_beranda_cache;
+        }
+        $this->_psda_beranda_cache = [];
+
+        $json = $this->_http_get('https://dpupesdm.monitoring4system.com/integrasi/beranda', 20);
+        $data = $json ? json_decode($json, true) : null;
+        if (!is_array($data)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($data as $blok) {
+            $daftar = isset($blok['logger']) ? $blok['logger'] : [];
+            foreach ($daftar as $l) {
+                $id = isset($l['id_logger']) ? (string) $l['id_logger'] : '';
+                if ($id === '') {
+                    continue;
+                }
+                // Klasifikasi lewat icon per-pos, bukan nama kategori PSDA:
+                // kategori "Stasiun Cuaca" memuat pos ARR maupun AWS.
+                $ctrl = $this->_psda_icon_ke_controller(isset($l['icon']) ? $l['icon'] : '');
+
+                $param = [];
+                $utama = null;
+                foreach ((isset($l['param']) ? $l['param'] : []) as $pp) {
+                    $alias = isset($pp['alias_sensor']) ? $pp['alias_sensor'] : (isset($pp['nama_parameter']) ? $pp['nama_parameter'] : '');
+                    if ($alias === '') {
+                        continue;
+                    }
+                    $item = [
+                        'nama_parameter' => $alias,
+                        'nilai' => (isset($pp['nilai']) && is_numeric(str_replace(',', '', (string) $pp['nilai'])))
+                            ? (float) str_replace(',', '', (string) $pp['nilai']) : null,
+                        'satuan' => isset($pp['satuan']) ? $pp['satuan'] : '',
+                        'parameter_utama' => (isset($pp['parameter_utama']) && $pp['parameter_utama'] == '1'),
+                    ];
+                    $param[$alias] = $item;
+                    if ($item['parameter_utama'] && $utama === null) {
+                        $utama = $item;
+                    }
+                }
+
+                // Satu pos bisa muncul di DUA kategori PSDA (mis. 10114 ada di
+                // "Curah Hujan" dan "Duga Air Tanah"). Entri pertama yang punya
+                // parameter utama dipertahankan; parameternya digabung, jangan
+                // ditimpa — kalau ditimpa, pos hujan bisa salah jadi kategori lain.
+                if (isset($out[$id])) {
+                    $out[$id]['param'] += $param;
+                    if ($out[$id]['param_utama'] === null && $utama !== null) {
+                        $out[$id]['param_utama'] = $utama;
+                        $out[$id]['controller'] = $ctrl;
+                        $out[$id]['kategori'] = isset($l['nama_kategori']) ? $l['nama_kategori'] : $out[$id]['kategori'];
+                    }
+                    continue;
+                }
+
+                $out[$id] = [
+                    'id_logger' => $id,
+                    'nama_lokasi' => isset($l['nama_lokasi']) ? $l['nama_lokasi'] : (isset($l['nama_logger']) ? $l['nama_logger'] : ''),
+                    'das' => isset($l['das']) ? $l['das'] : '',
+                    'kategori' => isset($l['nama_kategori']) ? $l['nama_kategori'] : '',
+                    'controller' => $ctrl,
+                    'waktu' => isset($l['waktu']) ? $l['waktu'] : null,
+                    'status_logger' => isset($l['status_logger']) ? $l['status_logger'] : '',
+                    'param' => $param,
+                    'param_utama' => $utama,
+                ];
+            }
+        }
+        $this->_psda_beranda_cache = $out;
+        return $out;
+    }
+
+    /**
+     * Rekap PER JAM pos PSDA dari integrasi/horizontal untuk satu rentang.
+     * PSDA hanya mengembalikan PARAMETER UTAMA tiap pos (TMA untuk AWLR,
+     * curah hujan untuk ARR/AWS) dan nilainya sudah diagregasi per jam
+     * (rata-rata untuk TMA, akumulasi untuk hujan). Jam tanpa data = '-'.
+     *
+     * @return array map[id_logger] = ['nama' => string, 'jam' => [nilai|null, ...]]
+     */
+    private function _psda_horizontal($controllers, $start, $end)
+    {
+        $peta_kat = ['awlr' => '8', 'arr' => 'arr', 'awr' => 'awr'];
+        $out = [];
+
+        foreach ($controllers as $c) {
+            if (!isset($peta_kat[$c])) {
+                continue; // klimatologi/afmr tidak ada padanannya di PSDA
+            }
+            $cache_key = $peta_kat[$c] . '|' . $start . '|' . $end;
+            if (isset($this->_psda_horizontal_cache[$cache_key])) {
+                $out += $this->_psda_horizontal_cache[$cache_key];
+                continue;
+            }
+
+            $url = 'https://dpupesdm.monitoring4system.com/integrasi/horizontal'
+                . '?id_kategori=' . urlencode($peta_kat[$c])
+                . '&dari=' . urlencode($start . ' 00:00:00')
+                . '&sampai=' . urlencode($end . ' 23:00:00');
+            $json = $this->_http_get($url, 40);
+            $data = $json ? json_decode($json, true) : null;
+
+            $blok = [];
+            if (is_array($data) && !empty($data['data_rekap'])) {
+                foreach ($data['data_rekap'] as $r) {
+                    $id = isset($r['id_logger']) ? (string) $r['id_logger'] : '';
+                    if ($id === '') {
+                        continue;
+                    }
+                    $jam = [];
+                    foreach ((isset($r['data']) ? $r['data'] : []) as $d) {
+                        $v = isset($d['nilai']) ? $d['nilai'] : null;
+                        $jam[] = ($v === null || $v === '-' || $v === '' || !is_numeric($v)) ? null : (float) $v;
+                    }
+                    $blok[$id] = [
+                        'nama' => isset($r['nama_logger']) ? $r['nama_logger'] : '',
+                        'jam' => $jam,
+                    ];
+                }
+            }
+            $this->_psda_horizontal_cache[$cache_key] = $blok;
+            $out += $blok;
+        }
+        return $out;
+    }
+
+    /** Agregasi deret nilai per jam PSDA sesuai mode agregasi ranking. */
+    private function _agregasi_jam($jam, $agregasi)
+    {
+        $v = array_values(array_filter($jam, function ($x) {
+            return $x !== null;
+        }));
+        if (empty($v)) {
+            return [null, 0];
+        }
+        switch ($agregasi) {
+            case 'total':
+                return [array_sum($v), count($v)];
+            case 'min':
+                return [min($v), count($v)];
+            case 'rata':
+                return [array_sum($v) / count($v), count($v)];
+            default:
+                return [max($v), count($v)];
+        }
+    }
+
+    /** Blok `cakupan` untuk tool yang MENGGABUNGKAN pos PSDA. */
+    private function _cakupan_gabung($controllers, $psda_masuk, $alasan_lewat = null)
+    {
+        $total_psda = $this->_jumlah_pos_psda($controllers);
+        $lewat = max(0, $total_psda - $psda_masuk);
+        $ket = "Pos BBWS Serayu Opak: semua ikut. Pos DPUPESDM DIY (PSDA): {$psda_masuk} ikut, {$lewat} tidak ikut.";
+        if ($lewat > 0) {
+            if ($alasan_lewat) {
+                $ket .= " Alasan: {$alasan_lewat}.";
+            }
+            $ket .= ' WAJIB sebutkan batasan ini saat menjawab.';
+        }
+        return [
+            'sumber' => ($psda_masuk > 0)
+                ? 'DB lokal BBWS + API PSDA (integrasi/horizontal, integrasi/beranda)'
+                : 'DB lokal BBWS Serayu Opak',
+            'pos_psda_termasuk' => $psda_masuk,
+            'pos_psda_tidak_termasuk' => $lewat,
+            'keterangan' => $ket,
+        ];
+    }
+
+    /** Blok `cakupan` untuk response tool agregasi. */
+    private function _cakupan_lokal($controllers = [], $tambahan = '')
+    {
+        $n = $this->_jumlah_pos_psda($controllers);
+        $ket = $n
+            ? "Hanya mencakup pos milik BBWS Serayu Opak. {$n} pos DPUPESDM DIY (PSDA) TIDAK termasuk. WAJIB sebutkan batasan ini saat menjawab."
+            : 'Semua pos pada kategori ini milik BBWS Serayu Opak.';
+        if ($tambahan) {
+            $ket .= ' ' . $tambahan;
+        }
+        return [
+            'sumber' => 'Database lokal BBWS Serayu Opak',
+            'pos_psda_tidak_termasuk' => $n,
+            'keterangan' => $ket,
+        ];
+    }
+
+    /** Nama tabel/kolom dari DB tetap divalidasi sebelum masuk SQL mentah. */
+    private function _aman_identifier($nama)
+    {
+        return (is_string($nama) && preg_match('/^[A-Za-z0-9_]{1,64}$/', $nama)) ? $nama : null;
+    }
+
+    /** Peta kategori yang diminta user → kolom `controller` di kategori_logger. */
+    private function _controllers_dari_kategori($kategori)
+    {
+        $k = strtolower(trim((string) $kategori));
+        $map = [
+            'arr' => ['arr'],
+            'aws' => ['awr'],
+            'awr' => ['awr'],
+            'awlr' => ['awlr'],
+            'afmr' => ['afmr'],
+            'klimatologi' => ['klimatologi'],
+            'hujan' => ['arr', 'awr'],
+            'cuaca' => ['awr', 'klimatologi'],
+            'all' => [],
+            'semua' => [],
+            '' => [],
+        ];
+        return isset($map[$k]) ? $map[$k] : [];
+    }
+
+    /** Pos lokal + lokasi + kategori. $controllers kosong = semua kategori aktif. */
+    private function _pos_terpilih($controllers = [], $das = null, $id_logger = null)
+    {
+        $this->db
+            ->select('t_logger.id_logger, t_logger.tabel_main, t_lokasi.nama_lokasi, t_lokasi.das,
+                      kategori_logger.nama_kategori, kategori_logger.controller, kategori_logger.temp_data')
+            ->from('t_logger')
+            ->join('kategori_logger', 'kategori_logger.id_katlogger = t_logger.kategori_log')
+            ->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
+            ->where('kategori_logger.view', 1);
+
+        if (!empty($controllers)) {
+            $this->db->where_in('kategori_logger.controller', $controllers);
+        }
+        if ($das) {
+            $this->db->like('t_lokasi.das', $das);
+        }
+        if ($id_logger) {
+            $this->db->where('t_logger.id_logger', $id_logger);
+        }
+
+        return $this->db->order_by('t_lokasi.nama_lokasi', 'ASC')->get()->result();
+    }
+
+    /** map[temp_data][code_logger] = baris data terakhir. Satu query per tabel temp. */
+    private function _batch_temp($pos)
+    {
+        $tabel = [];
+        foreach ($pos as $p) {
+            if ($this->_aman_identifier($p->temp_data)) {
+                $tabel[$p->temp_data] = true;
+            }
+        }
+        $map = [];
+        foreach (array_keys($tabel) as $t) {
+            $map[$t] = [];
+            foreach ($this->db->get($t)->result() as $r) {
+                $map[$t][$r->code_logger] = $r;
+            }
+        }
+        return $map;
+    }
+
+    /** set[id_logger] = true untuk pos yang sedang perbaikan. */
+    private function _batch_perbaikan()
+    {
+        $out = [];
+        foreach ($this->db->select('id_logger')->get('t_perbaikan')->result() as $r) {
+            $out[$r->id_logger] = true;
+        }
+        return $out;
+    }
+
+    /**
+     * map[id_logger] = baris parameter_sensor yang paling cocok dengan $filter.
+     * parameter_utama diprioritaskan. Satu query untuk semua pos.
+     */
+    private function _batch_param($ids, $filter)
+    {
+        if (empty($ids) || trim((string) $filter) === '') {
+            return [];
+        }
+
+        $syn = $this->_param_synonyms();
+        $words = array_filter(
+            explode(' ', strtolower(str_replace('_', ' ', $filter))),
+            function ($w) {
+                return strlen($w) >= 2;
+            }
+        );
+        $sinonim = [];
+        foreach ($words as $w) {
+            if (isset($syn[$w])) {
+                $sinonim = array_merge($sinonim, $syn[$w]);
+            }
+        }
+        $words = array_unique($words);
+        $sinonim = array_diff(array_unique($sinonim), $words);
+        if (empty($words) && empty($sinonim)) {
+            return [];
+        }
+
+        $rows = $this->db
+            ->where_in('logger_id', $ids)
+            ->order_by('parameter_utama', 'DESC')
+            ->get('parameter_sensor')->result();
+
+        // Dua lintasan: kata asli user lebih dulu, sinonim baru sesudahnya.
+        // Tanpa ini 'tma' bisa nyasar ke Suhu_Air lewat sinonim 'air'.
+        $map = [];
+        foreach ([$words, $sinonim] as $kandidat) {
+            foreach ($rows as $r) {
+                if (isset($map[$r->logger_id]) || !$this->_aman_identifier($r->kolom_sensor)) {
+                    continue;
+                }
+                $nama = strtolower(str_replace('_', ' ', (string) $r->nama_parameter));
+                foreach ($kandidat as $w) {
+                    if (strpos($nama, $w) !== false) {
+                        $map[$r->logger_id] = $r;
+                        break;
+                    }
+                }
+            }
+        }
+        return $map;
+    }
+
+    /**
+     * Terapkan rumus_debit milik pos (kolom `rumus`, variabel $h).
+     * Pola eval-nya sama dengan data_analisa() supaya angkanya konsisten
+     * dengan halaman web.
+     */
+    private function _debit_from_rumus($id_logger, $h)
+    {
+        if (!array_key_exists($id_logger, $this->_rumus_cache)) {
+            $row = $this->db->where('id_logger', $id_logger)->get('rumus_debit')->row();
+            $this->_rumus_cache[$id_logger] = ($row && !empty($row->rumus)) ? $row->rumus : false;
+        }
+        $rumus = $this->_rumus_cache[$id_logger];
+        if ($rumus === false || !is_numeric($h)) {
+            return $h;
+        }
+        if ($h < 0) {
+            return 0;
+        }
+        $hasil = @eval ('return ' . $rumus . ';');
+        return is_numeric($hasil) ? $hasil : $h;
+    }
+
+    /** Rentang tanggal bersama untuk ranking & kesehatan. */
+    private function _rentang_dari_input($input, $maks_hari)
+    {
+        $tanggal = isset($input['tanggal']) ? $input['tanggal'] : null;
+        $start = isset($input['start']) ? $input['start'] : null;
+        $end = isset($input['end']) ? $input['end'] : null;
+        $bulan = isset($input['bulan']) ? $input['bulan'] : null;
+
+        if ($bulan) {
+            $start = $bulan . '-01';
+            $end = date('Y-m-t', strtotime($start));
+            $mode = 'bulanan';
+        } elseif ($start && $end) {
+            $mode = 'range';
+        } elseif ($tanggal) {
+            $start = $end = $tanggal;
+            $mode = 'harian';
+        } else {
+            $start = $end = date('Y-m-d');
+            $mode = 'harian';
+        }
+
+        if (!strtotime($start) || !strtotime($end)) {
+            return ['error' => 'Format tanggal tidak valid. Gunakan YYYY-MM-DD atau bulan YYYY-MM.'];
+        }
+        if (strtotime($start) > strtotime($end)) {
+            list($start, $end) = [$end, $start];
+        }
+        $hari = (strtotime($end) - strtotime($start)) / 86400 + 1;
+        if ($hari > $maks_hari) {
+            return ['error' => "Rentang maksimal {$maks_hari} hari."];
+        }
+
+        return ['mode' => $mode, 'start' => $start, 'end' => $end, 'jumlah_hari' => (int) $hari];
+    }
+
+    // ═══════════════════════════════════════════
+    // STATUS SIAGA — ambang tingkat_siaga_awlr vs TMA terkini
+    // ═══════════════════════════════════════════
+    public function status_siaga()
+    {
+        $input = $this->_json_input();
+        $id_logger = isset($input['id_logger']) ? trim((string) $input['id_logger']) : null;
+        $das = isset($input['das']) ? trim((string) $input['das']) : null;
+        $filter = isset($input['filter']) ? strtolower($input['filter']) : 'semua';
+
+        $pos = $this->_pos_terpilih(['awlr'], $das, $id_logger);
+        if (empty($pos)) {
+            return $this->_json_response([
+                'status' => 'error',
+                'message' => $id_logger
+                    ? "Pos {$id_logger} bukan pos AWLR lokal atau tidak ditemukan."
+                    : 'Tidak ada pos AWLR yang cocok.'
+            ]);
+        }
+
+        $ids = [];
+        foreach ($pos as $p) {
+            $ids[] = $p->id_logger;
+        }
+
+        // Batch: ambang siaga, data terakhir, status perbaikan, kolom TMA
+        $ambang_map = [];
+        foreach ($this->db->where_in('id_logger', $ids)->get('tingkat_siaga_awlr')->result_array() as $r) {
+            $ambang_map[$r['id_logger']][] = $r;
+        }
+        $temp = $this->_batch_temp($pos);
+        $perbaikan = $this->_batch_perbaikan();
+        $param = $this->_batch_param($ids, 'tma');
+
+        $detail = [];
+        $ringkas = ['total_pos' => 0, 'bahaya' => 0, 'aman' => 0, 'tanpa_ambang' => 0, 'tanpa_data' => 0];
+
+        foreach ($pos as $p) {
+            $id = $p->id_logger;
+            $ringkas['total_pos']++;
+
+            $row = isset($temp[$p->temp_data][$id]) ? $temp[$p->temp_data][$id] : null;
+            $waktu = $row ? $row->waktu : null;
+            $koneksi = isset($perbaikan[$id]) ? 'perbaikan' : $this->_cek_koneksi($waktu);
+
+            $kolom = isset($param[$id]) ? $param[$id]->kolom_sensor : null;
+            $satuan = isset($param[$id]) ? $param[$id]->satuan : 'm';
+            $tma = ($row && $kolom && isset($row->$kolom) && is_numeric($row->$kolom)) ? (float) $row->$kolom : null;
+
+            $ev = $this->siaga->evaluasi($tma, isset($ambang_map[$id]) ? $ambang_map[$id] : []);
+
+            if ($ev['level'] === 'Tidak diatur') {
+                $ringkas['tanpa_ambang']++;
+            } elseif ($ev['level'] === 'Data tidak tersedia') {
+                $ringkas['tanpa_data']++;
+            } elseif ($ev['is_bahaya']) {
+                $ringkas['bahaya']++;
+            } else {
+                $ringkas['aman']++;
+            }
+
+            if ($filter === 'bahaya_saja' && !$ev['is_bahaya']) {
+                continue;
+            }
+
+            $item = [
+                'id_logger' => $id,
+                'lokasi' => $p->nama_lokasi,
+                'das' => $p->das,
+                'tma_terkini' => ($tma === null) ? null : number_format($tma, 2, '.', ''),
+                'satuan' => $satuan,
+                'level_siaga' => $ev['level'],
+                'is_bahaya' => $ev['is_bahaya'],
+                'ambang_terlampaui' => $ev['nilai_ambang'],
+                'ambang_berikutnya' => $ev['ambang_berikutnya'],
+                'sisa_ke_ambang_berikutnya' => $ev['sisa_ke_ambang_berikutnya'],
+                'koneksi' => $koneksi,
+                'waktu_terakhir' => $waktu,
+            ];
+            // Daftar ambang lengkap hanya saat 1 pos diminta (hemat token)
+            if ($id_logger) {
+                $item['ambang_terpasang'] = $ev['ambang_terpasang'];
+            }
+            $detail[] = $item;
+        }
+
+        // Paling gawat di atas: bahaya dulu, lalu ambang tertinggi
+        usort($detail, function ($a, $b) {
+            if ($a['is_bahaya'] !== $b['is_bahaya']) {
+                return $a['is_bahaya'] ? -1 : 1;
+            }
+            return ((float) $b['ambang_terlampaui']) <=> ((float) $a['ambang_terlampaui']);
+        });
+
+        $this->_json_response([
+            'status' => 'sukses',
+            'waktu_evaluasi' => date('Y-m-d H:i:s'),
+            'ringkasan' => $ringkas,
+            'cakupan' => $this->_cakupan_lokal(['awlr'], 'Ambang siaga hanya bisa diisi admin untuk pos BBWS (Pengaturan > Tingkat Siaga AWLR), jadi pos PSDA memang TIDAK punya ambang siaga di sistem ini — halaman rekapitulasi pun tidak mewarnainya.'),
+            'catatan' => 'Level siaga dibaca dari tabel tingkat_siaga_awlr per pos. Pos "Tidak diatur" berarti ambang belum diisi admin — bukan berarti aman.',
+            'jumlah_ditampilkan' => count($detail),
+            'data' => $detail,
+        ]);
+    }
+
+    // ═══════════════════════════════════════════
+    // RANKING — agregasi lintas pos untuk 1 parameter
+    // ═══════════════════════════════════════════
+    public function ranking_pos()
+    {
+        $input = $this->_json_input();
+        $parameter = isset($input['parameter']) ? trim((string) $input['parameter']) : 'hujan';
+        $agregasi = isset($input['agregasi']) ? strtolower($input['agregasi']) : 'auto';
+        $urut = (isset($input['urut']) && strtolower($input['urut']) === 'asc') ? 'asc' : 'desc';
+        $das = isset($input['das']) ? trim((string) $input['das']) : null;
+        $limit = isset($input['limit']) ? (int) $input['limit'] : 10;
+        $limit = max(1, min(50, $limit));
+        $sertakan_psda = !isset($input['sertakan_psda']) || (bool) $input['sertakan_psda'];
+
+        $rentang = $this->_rentang_dari_input($input, 366);
+        if (isset($rentang['error'])) {
+            return $this->_json_response(['status' => 'error', 'message' => $rentang['error']]);
+        }
+
+        // Kategori: eksplisit dari user, atau ditebak dari parameter
+        if (!empty($input['kategori'])) {
+            $controllers = $this->_controllers_dari_kategori($input['kategori']);
+        } else {
+            $p = strtolower($parameter);
+            if (strpos($p, 'hujan') !== false || strpos($p, 'rain') !== false || strpos($p, 'curah') !== false) {
+                $controllers = ['arr', 'awr'];
+            } elseif (strpos($p, 'tma') !== false || strpos($p, 'debit') !== false || strpos($p, 'muka air') !== false) {
+                $controllers = ['awlr', 'afmr'];
+            } else {
+                $controllers = [];
+            }
+        }
+
+        // Pos lokal boleh kosong: pos PSDA tidak ada di t_logger dan digabung di bawah.
+        $pos = $this->_pos_terpilih($controllers, $das, null);
+        $ids = [];
+        foreach ($pos as $p) {
+            $ids[] = $p->id_logger;
+        }
+        $param = $this->_batch_param($ids, $parameter);
+
+        // Agregasi: akumulasi untuk parameter kumulatif (tipe_graf=column), selain itu maksimum
+        if ($agregasi === 'auto') {
+            $agregasi = 'max';
+            foreach ($param as $pr) {
+                if ($pr->tipe_graf == 'column') {
+                    $agregasi = 'total';
+                    break;
+                }
+            }
+        }
+        $fn_map = ['total' => 'SUM', 'max' => 'MAX', 'min' => 'MIN', 'rata' => 'AVG'];
+        if (!isset($fn_map[$agregasi])) {
+            return $this->_json_response(['status' => 'error', 'message' => 'agregasi harus total/max/min/rata']);
+        }
+        $fn = $fn_map[$agregasi];
+
+        // Kelompokkan per (tabel_main, kolom_sensor) → 1 query per kelompok, di-UNION
+        $groups = [];
+        $pos_by_id = [];
+        foreach ($pos as $p) {
+            $pos_by_id[$p->id_logger] = $p;
+            if (!isset($param[$p->id_logger]) || !$this->_aman_identifier($p->tabel_main)) {
+                continue;
+            }
+            $kolom = $param[$p->id_logger]->kolom_sensor;
+            $key = $p->tabel_main . '|' . $kolom;
+            $groups[$key]['tabel'] = $p->tabel_main;
+            $groups[$key]['kolom'] = $kolom;
+            $groups[$key]['ids'][] = $p->id_logger;
+        }
+        $esc_start = $this->db->escape($rentang['start'] . ' 00:00:00');
+        $esc_end = $this->db->escape($rentang['end'] . ' 23:59:59');
+        $parts = [];
+        foreach ($groups as $g) {
+            $ids_esc = implode(',', array_map([$this->db, 'escape'], $g['ids']));
+            $parts[] = "SELECT code_logger, {$fn}(`{$g['kolom']}`) AS nilai, COUNT(*) AS jml_baris
+                        FROM `{$g['tabel']}`
+                        WHERE code_logger IN ({$ids_esc}) AND waktu >= {$esc_start} AND waktu <= {$esc_end}
+                        GROUP BY code_logger";
+        }
+        $hasil = $groups ? $this->db->query(implode(' UNION ALL ', $parts))->result() : [];
+
+        $is_debit = (strpos(strtolower($parameter), 'debit') !== false);
+        $rows = [];
+        foreach ($hasil as $r) {
+            if (!isset($pos_by_id[$r->code_logger], $param[$r->code_logger]) || !is_numeric($r->nilai)) {
+                continue;
+            }
+            $p = $pos_by_id[$r->code_logger];
+            $pr = $param[$r->code_logger];
+            $nilai = (float) $r->nilai;
+            if ($is_debit && $pr->debit_awlr == '1') {
+                $nilai = (float) $this->_debit_from_rumus($r->code_logger, $nilai);
+            }
+            $rows[] = [
+                'id_logger' => $r->code_logger,
+                'lokasi' => $p->nama_lokasi,
+                'das' => $p->das,
+                'kategori' => $p->nama_kategori,
+                'parameter' => $pr->nama_parameter,
+                'nilai' => round($nilai, 2),
+                'satuan' => $pr->satuan,
+                'jml_data' => (int) $r->jml_baris,
+                'sumber' => 'BBWS',
+            ];
+        }
+
+        // ── Gabungkan pos PSDA ──
+        // integrasi/horizontal hanya mengembalikan PARAMETER UTAMA tiap pos
+        // (TMA untuk AWLR, curah hujan untuk ARR/AWS), jadi hanya dua jenis
+        // pertanyaan ini yang bisa mencakup PSDA.
+        $p_low = strtolower($parameter);
+        $tanya_hujan = (strpos($p_low, 'hujan') !== false || strpos($p_low, 'rain') !== false || strpos($p_low, 'curah') !== false);
+        $tanya_tma = (strpos($p_low, 'tma') !== false || strpos($p_low, 'muka air') !== false || strpos($p_low, 'water') !== false || strpos($p_low, 'level') !== false);
+        $psda_ctrl = [];
+        if ($tanya_hujan) {
+            $psda_ctrl = array_values(array_intersect($controllers ?: ['arr', 'awr'], ['arr', 'awr']));
+        } elseif ($tanya_tma) {
+            $psda_ctrl = array_values(array_intersect($controllers ?: ['awlr'], ['awlr']));
+        }
+
+        $psda_masuk = 0;
+        $psda_alasan = null;
+        if (!$sertakan_psda) {
+            $psda_alasan = 'dimatikan lewat parameter sertakan_psda';
+        } elseif (empty($psda_ctrl)) {
+            $psda_alasan = "PSDA hanya menyediakan rekap parameter utama (TMA untuk AWLR, curah hujan untuk ARR/AWS), sedangkan yang diminta '{$parameter}'";
+        } elseif ($rentang['jumlah_hari'] > 31) {
+            $psda_alasan = 'rentang lebih dari 31 hari, rekap per jam PSDA terlalu besar untuk diambil';
+        } else {
+            $psda_jam = $this->_psda_horizontal($psda_ctrl, $rentang['start'], $rentang['end']);
+            $psda_info = $this->_psda_beranda();
+            if (empty($psda_jam)) {
+                $psda_alasan = 'API PSDA tidak merespons atau tidak mengembalikan data';
+            }
+            foreach ($psda_jam as $pid => $blok) {
+                if (isset($pos_by_id[$pid])) {
+                    continue; // sudah dihitung sebagai pos lokal
+                }
+                $inf = isset($psda_info[$pid]) ? $psda_info[$pid] : null;
+                if ($inf && $inf['controller'] && !in_array($inf['controller'], $psda_ctrl, true)) {
+                    continue;
+                }
+                if ($das && $inf && stripos((string) $inf['das'], $das) === false) {
+                    continue;
+                }
+                list($nilai_psda, $n_psda) = $this->_agregasi_jam($blok['jam'], $agregasi);
+                if ($nilai_psda === null) {
+                    continue;
+                }
+                $utama = ($inf && $inf['param_utama']) ? $inf['param_utama'] : null;
+                $rows[] = [
+                    'id_logger' => $pid,
+                    'lokasi' => $inf ? $inf['nama_lokasi'] : $blok['nama'],
+                    'das' => $inf ? $inf['das'] : '',
+                    'kategori' => trim((($inf && $inf['kategori']) ? $inf['kategori'] : '') . ' (PSDA)'),
+                    'parameter' => $utama ? $utama['nama_parameter'] : $parameter,
+                    'nilai' => round($nilai_psda, 2),
+                    'satuan' => $utama ? $utama['satuan'] : '',
+                    'jml_data' => $n_psda,
+                    'sumber' => 'PSDA',
+                ];
+                $psda_masuk++;
+            }
+        }
+
+        if (empty($rows)) {
+            return $this->_json_response([
+                'status' => 'sukses',
+                'message' => "Tidak ada data untuk parameter '{$parameter}' pada rentang tersebut.",
+                'periode' => $rentang,
+                'cakupan' => $this->_cakupan_gabung($controllers, $psda_masuk, $psda_alasan),
+                'data' => [],
+            ]);
+        }
+
+        usort($rows, function ($a, $b) use ($urut) {
+            return ($urut === 'asc') ? ($a['nilai'] <=> $b['nilai']) : ($b['nilai'] <=> $a['nilai']);
+        });
+        $total_pos_berdata = count($rows);
+        $semua_nilai = array_column($rows, 'nilai');
+        $rows = array_slice($rows, 0, $limit);
+        foreach ($rows as $k => $v) {
+            $rows[$k] = array_merge(['peringkat' => $k + 1], $v);
+        }
+
+        $out = [
+            'status' => 'sukses',
+            'parameter' => $parameter,
+            'agregasi' => $agregasi,
+            'urut' => $urut,
+            'periode' => ['mode' => $rentang['mode'], 'start' => $rentang['start'], 'end' => $rentang['end'], 'jumlah_hari' => $rentang['jumlah_hari']],
+            'cakupan' => $this->_cakupan_gabung($controllers, $psda_masuk, $psda_alasan),
+            'ringkasan' => [
+                'pos_berdata' => $total_pos_berdata,
+                'ditampilkan' => count($rows),
+                'nilai_tertinggi' => max($semua_nilai),
+                'nilai_terendah' => min($semua_nilai),
+                'total_semua_pos' => round(array_sum($semua_nilai), 2),
+                'rata_semua_pos' => round(array_sum($semua_nilai) / $total_pos_berdata, 2),
+            ],
+            'data' => $rows,
+        ];
+        $catatan = [];
+        if ($is_debit) {
+            // ponytail: rumus_debit dari DB diterapkan; koreksi hardcoded per-pos
+            // di data_analisa() (10063, 10249, Debit_Aliran_Sungai) TIDAK ikut.
+            $catatan[] = 'Debit dihitung dari rumus_debit yang terdaftar. Beberapa pos dengan koreksi khusus bisa berbeda dari halaman analisa — verifikasi lewat get_data_analisa bila angkanya dipakai untuk laporan.';
+        }
+        if ($psda_masuk > 0) {
+            $catatan[] = 'Nilai pos PSDA dihitung dari rekap PER JAM milik PSDA (bukan data mentah): TMA per jam sudah dirata-rata di sisi PSDA, jadi max/min pos PSDA adalah nilai per jam, bukan puncak sesaat. Akumulasi hujan tidak terpengaruh.';
+        }
+        if ($catatan) {
+            $out['catatan'] = implode(' ', $catatan);
+        }
+        $this->_json_response($out);
+    }
+
+    // ═══════════════════════════════════════════
+    // KESEHATAN POS — koneksi, kelengkapan data, baterai
+    // ═══════════════════════════════════════════
+    public function kesehatan_pos()
+    {
+        $input = $this->_json_input();
+        $id_logger = isset($input['id_logger']) ? trim((string) $input['id_logger']) : null;
+        $das = isset($input['das']) ? trim((string) $input['das']) : null;
+        $filter = isset($input['filter']) ? strtolower($input['filter']) : 'bermasalah';
+        $limit = isset($input['limit']) ? (int) $input['limit'] : 50;
+        $limit = max(1, min(200, $limit));
+        $batas_lengkap = isset($input['batas_kelengkapan']) ? (float) $input['batas_kelengkapan'] : 90;
+        // Ambang baterai tergantung perangkat — tanpa nilai dari user, baterai
+        // hanya dilaporkan, tidak ikut menandai pos bermasalah.
+        $batas_baterai = isset($input['batas_baterai']) && is_numeric($input['batas_baterai'])
+            ? (float) $input['batas_baterai'] : null;
+        $sertakan_psda = !isset($input['sertakan_psda']) || (bool) $input['sertakan_psda'];
+
+        $rentang = $this->_rentang_dari_input($input, 31);
+        if (isset($rentang['error'])) {
+            return $this->_json_response(['status' => 'error', 'message' => $rentang['error']]);
+        }
+
+        $controllers = !empty($input['kategori']) ? $this->_controllers_dari_kategori($input['kategori']) : [];
+        // Pos lokal boleh kosong: pos PSDA tidak ada di t_logger dan digabung di bawah.
+        $pos = $this->_pos_terpilih($controllers, $das, $id_logger);
+
+        $ids = [];
+        foreach ($pos as $p) {
+            $ids[] = $p->id_logger;
+        }
+        $temp = $this->_batch_temp($pos);
+        $perbaikan = $this->_batch_perbaikan();
+        $param_bat = $this->_batch_param($ids, 'baterai');
+
+        // Jam window; hari ini dipotong sampai sekarang supaya % tidak semu rendah
+        $mulai_ts = strtotime($rentang['start'] . ' 00:00:00');
+        $akhir_ts = min(strtotime($rentang['end'] . ' 23:59:59'), time());
+        $total_jam = max(1, (int) floor(($akhir_ts - $mulai_ts) / 3600) + 1);
+
+        // Kelengkapan diukur per JAM terisi, bukan per baris:
+        // ponytail: interval kirim tidak tersimpan di skema, jadi cakupan jam
+        // adalah ukuran paling jujur tanpa menebak interval per perangkat.
+        $groups = [];
+        foreach ($pos as $p) {
+            if ($this->_aman_identifier($p->tabel_main)) {
+                $groups[$p->tabel_main][] = $p->id_logger;
+            }
+        }
+        $esc_start = $this->db->escape(date('Y-m-d H:i:s', $mulai_ts));
+        $esc_end = $this->db->escape(date('Y-m-d H:i:s', $akhir_ts));
+        $parts = [];
+        foreach ($groups as $tabel => $grp_ids) {
+            $ids_esc = implode(',', array_map([$this->db, 'escape'], $grp_ids));
+            $parts[] = "SELECT code_logger, COUNT(*) AS jml_baris,
+                               COUNT(DISTINCT DATE_FORMAT(waktu, '%Y-%m-%d %H')) AS jam_terisi,
+                               MAX(waktu) AS data_terakhir
+                        FROM `{$tabel}`
+                        WHERE code_logger IN ({$ids_esc}) AND waktu >= {$esc_start} AND waktu <= {$esc_end}
+                        GROUP BY code_logger";
+        }
+        $cakupan = [];
+        if ($parts) {
+            foreach ($this->db->query(implode(' UNION ALL ', $parts))->result() as $r) {
+                $cakupan[$r->code_logger] = $r;
+            }
+        }
+
+        $detail = [];
+        $ringkas = [
+            'total_pos' => 0, 'sehat' => 0, 'bermasalah' => 0,
+            'offline' => 0, 'perbaikan' => 0, 'data_tidak_lengkap' => 0, 'tanpa_data' => 0,
+        ];
+
+        foreach ($pos as $p) {
+            $id = $p->id_logger;
+            $ringkas['total_pos']++;
+
+            $row = isset($temp[$p->temp_data][$id]) ? $temp[$p->temp_data][$id] : null;
+            $waktu = $row ? $row->waktu : null;
+            $is_perbaikan = isset($perbaikan[$id]);
+            $koneksi = $is_perbaikan ? 'perbaikan' : $this->_cek_koneksi($waktu);
+
+            $c = isset($cakupan[$id]) ? $cakupan[$id] : null;
+            $jam_terisi = $c ? (int) $c->jam_terisi : 0;
+            $kelengkapan = round(min(100, $jam_terisi / $total_jam * 100), 1);
+
+            $bat = null;
+            if (isset($param_bat[$id]) && $row) {
+                $kb = $param_bat[$id]->kolom_sensor;
+                if (isset($row->$kb) && is_numeric($row->$kb)) {
+                    $bat = (float) $row->$kb;
+                }
+            }
+
+            $masalah = [];
+            if ($is_perbaikan) {
+                $masalah[] = 'sedang perbaikan';
+                $ringkas['perbaikan']++;
+            } elseif ($koneksi !== 'On') {
+                $masalah[] = 'koneksi terputus';
+                $ringkas['offline']++;
+            }
+            if ($jam_terisi === 0) {
+                $masalah[] = 'tidak ada data pada periode ini';
+                $ringkas['tanpa_data']++;
+            } elseif ($kelengkapan < $batas_lengkap) {
+                $masalah[] = "data tidak lengkap ({$kelengkapan}%)";
+                $ringkas['data_tidak_lengkap']++;
+            }
+            if ($batas_baterai !== null && $bat !== null && $bat < $batas_baterai) {
+                $masalah[] = "baterai rendah ({$bat})";
+            }
+
+            if ($masalah) {
+                $ringkas['bermasalah']++;
+            } else {
+                $ringkas['sehat']++;
+            }
+
+            if ($filter === 'bermasalah' && !$masalah) {
+                continue;
+            }
+
+            $detail[] = [
+                'id_logger' => $id,
+                'lokasi' => $p->nama_lokasi,
+                'das' => $p->das,
+                'kategori' => $p->nama_kategori,
+                'koneksi' => $koneksi,
+                'data_terakhir' => $waktu,
+                'umur_data_menit' => $waktu ? (int) round((time() - strtotime($waktu)) / 60) : null,
+                'jam_terisi' => $jam_terisi,
+                'jam_seharusnya' => $total_jam,
+                'jam_kosong' => max(0, $total_jam - $jam_terisi),
+                'kelengkapan_persen' => $kelengkapan,
+                'jml_baris' => $c ? (int) $c->jml_baris : 0,
+                'baterai' => $bat,
+                'masalah' => $masalah,
+                'sumber' => 'BBWS',
+            ];
+        }
+
+        // ── Gabungkan pos PSDA ──
+        // Status & baterai dari integrasi/beranda (1 request untuk semua pos);
+        // kelengkapan jam dari integrasi/horizontal (parameter utama saja).
+        $psda_masuk = 0;
+        $psda_alasan = null;
+        if (!$sertakan_psda) {
+            $psda_alasan = 'dimatikan lewat parameter sertakan_psda';
+        } else {
+            $psda_info = $this->_psda_beranda();
+            if (empty($psda_info)) {
+                $psda_alasan = 'API PSDA tidak merespons';
+            } else {
+                $psda_ctrl = array_values(array_intersect($controllers ?: ['awlr', 'arr', 'awr'], ['awlr', 'arr', 'awr']));
+                $psda_jam = $psda_ctrl ? $this->_psda_horizontal($psda_ctrl, $rentang['start'], $rentang['end']) : [];
+
+                foreach ($psda_info as $pid => $inf) {
+                    if (in_array((string) $pid, array_map('strval', $ids), true)) {
+                        continue; // sudah dihitung sebagai pos lokal
+                    }
+                    if ($id_logger && $pid !== $id_logger) {
+                        continue;
+                    }
+                    if (!empty($psda_ctrl) && (!$inf['controller'] || !in_array($inf['controller'], $psda_ctrl, true))) {
+                        continue;
+                    }
+                    if ($das && stripos((string) $inf['das'], $das) === false) {
+                        continue;
+                    }
+
+                    $ringkas['total_pos']++;
+                    $psda_masuk++;
+
+                    $waktu_p = $inf['waktu'];
+                    // Pakai aturan koneksi yang sama dengan pos lokal (data < 1 jam)
+                    // supaya angkanya sebanding; status milik PSDA tetap dilaporkan.
+                    $koneksi_p = $this->_cek_koneksi($waktu_p);
+
+                    $jam_p = isset($psda_jam[$pid]) ? $psda_jam[$pid]['jam'] : null;
+                    $terisi_p = null;
+                    $lengkap_p = null;
+                    if (is_array($jam_p)) {
+                        $terisi_p = count(array_filter($jam_p, function ($x) {
+                            return $x !== null;
+                        }));
+                        $lengkap_p = round(min(100, $terisi_p / $total_jam * 100), 1);
+                    }
+
+                    $bat_p = null;
+                    foreach ($inf['param'] as $nama_p => $pp) {
+                        if (stripos($nama_p, 'aterai') !== false || stripos($nama_p, 'attery') !== false) {
+                            $bat_p = $pp['nilai'];
+                            break;
+                        }
+                    }
+
+                    $masalah_p = [];
+                    if ($koneksi_p !== 'On') {
+                        $masalah_p[] = 'koneksi terputus';
+                        $ringkas['offline']++;
+                    }
+                    if ($terisi_p === 0) {
+                        $masalah_p[] = 'tidak ada data pada periode ini';
+                        $ringkas['tanpa_data']++;
+                    } elseif ($lengkap_p !== null && $lengkap_p < $batas_lengkap) {
+                        $masalah_p[] = "data tidak lengkap ({$lengkap_p}%)";
+                        $ringkas['data_tidak_lengkap']++;
+                    }
+                    if ($batas_baterai !== null && $bat_p !== null && $bat_p < $batas_baterai) {
+                        $masalah_p[] = "baterai rendah ({$bat_p})";
+                    }
+
+                    if ($masalah_p) {
+                        $ringkas['bermasalah']++;
+                    } else {
+                        $ringkas['sehat']++;
+                    }
+                    if ($filter === 'bermasalah' && !$masalah_p) {
+                        continue;
+                    }
+
+                    $detail[] = [
+                        'id_logger' => $pid,
+                        'lokasi' => $inf['nama_lokasi'],
+                        'das' => $inf['das'],
+                        'kategori' => trim($inf['kategori'] . ' (PSDA)'),
+                        'koneksi' => $koneksi_p,
+                        'status_menurut_psda' => $inf['status_logger'],
+                        'data_terakhir' => $waktu_p,
+                        'umur_data_menit' => $waktu_p ? (int) round((time() - strtotime($waktu_p)) / 60) : null,
+                        'jam_terisi' => $terisi_p,
+                        'jam_seharusnya' => $total_jam,
+                        'jam_kosong' => ($terisi_p === null) ? null : max(0, $total_jam - $terisi_p),
+                        'kelengkapan_persen' => $lengkap_p,
+                        'jml_baris' => null,
+                        'baterai' => $bat_p,
+                        'masalah' => $masalah_p,
+                        'sumber' => 'PSDA',
+                    ];
+                }
+            }
+        }
+
+        if ($ringkas['total_pos'] === 0) {
+            return $this->_json_response(['status' => 'error', 'message' => 'Tidak ada pos yang cocok dengan filter.']);
+        }
+
+        // Paling parah di atas
+        usort($detail, function ($a, $b) {
+            if (count($a['masalah']) !== count($b['masalah'])) {
+                return count($b['masalah']) - count($a['masalah']);
+            }
+            // null = kelengkapan tidak diketahui, jangan diperlakukan seperti 0%
+            return ($a['kelengkapan_persen'] ?? 100) <=> ($b['kelengkapan_persen'] ?? 100);
+        });
+        $dipotong = count($detail) > $limit;
+        $detail = array_slice($detail, 0, $limit);
+
+        $this->_json_response([
+            'status' => 'sukses',
+            'periode' => ['mode' => $rentang['mode'], 'start' => $rentang['start'], 'end' => $rentang['end'], 'jam_dievaluasi' => $total_jam],
+            'filter' => $filter,
+            'batas_kelengkapan_persen' => $batas_lengkap,
+            'ringkasan' => $ringkas,
+            'cakupan' => $this->_cakupan_gabung($controllers, $psda_masuk, $psda_alasan),
+            'catatan' => 'Kelengkapan dihitung dari jumlah JAM yang punya minimal satu data, dibanding total jam pada periode. Baterai hanya ditandai bermasalah bila batas_baterai diisi. Untuk pos PSDA: kelengkapan diukur dari parameter utama saja, jml_baris tidak tersedia, dan kelengkapan_persen null berarti rekap per jam PSDA tidak bisa diambil (bukan 0%).',
+            'jumlah_ditampilkan' => count($detail),
+            'terpotong' => $dipotong,
+            'data' => $detail,
+        ]);
+    }
+
 }
