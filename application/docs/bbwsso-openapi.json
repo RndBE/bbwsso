@@ -62,7 +62,7 @@
           "Logger"
         ],
         "summary": "Snapshot seluruh logger aktif",
-        "description": "Nilai terakhir setiap parameter untuk semua pos pada kategori yang aktif, beserta status koneksi, koordinat, DAS, dan foto pos bila ada.",
+        "description": "Nilai terakhir setiap parameter untuk semua pos pada kategori yang aktif, beserta status koneksi, koordinat, DAS, dan foto pos bila ada. Hasil diurutkan menaik menurut `id_logger`.",
         "operationId": "semuaLogger",
         "responses": {
           "200": {

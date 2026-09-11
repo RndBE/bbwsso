@@ -93,6 +93,12 @@ assert(isset($spec['components']['schemas']['RangeLoggerResponse']['properties']
     'field terpotong didokumentasikan');
 assert(strpos($src, "'terpotong' => \$terpotong") !== false, 'controller benar-benar mengirim terpotong');
 
+// Urutan all_logger yang didokumentasikan harus benar-benar diterapkan
+assert(strpos($spec['paths']['/integrasi_api/all_logger']['get']['description'], 'id_logger') !== false,
+    'urutan all_logger disebut di dokumen');
+assert(preg_match('/order_by\(\s*\x27CAST\(t_logger\.id_logger AS UNSIGNED\)\x27/', $src) === 1,
+    'all_logger benar-benar diurutkan menurut id_logger secara numerik');
+
 // Level akun: akun tamu/user tidak boleh bisa memakai API, sandinya publik
 $lib = file_get_contents($ROOT . '/application/libraries/Basic_auth.php');
 preg_match('/\$level_diizinkan\s*=\s*\[([^\]]*)\]/', $lib, $ml);

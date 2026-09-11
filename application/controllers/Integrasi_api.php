@@ -110,7 +110,9 @@ class Integrasi_api extends CI_Controller
 			->join('kategori_logger', 'kategori_logger.id_katlogger = t_logger.kategori_log')
 			->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
 			->where('kategori_logger.view', 1)
-			->order_by('t_lokasi.nama_lokasi', 'ASC')
+			// CAST supaya urut angka, bukan teks: kolomnya varchar, jadi tanpa
+			// ini ID yang panjangnya beda akan tersusun keliru (mis. "9" > "10048").
+			->order_by('CAST(t_logger.id_logger AS UNSIGNED)', 'ASC', false)
 			->get()->result();
 
 		// Satu query per tabel temp, bukan per logger.
