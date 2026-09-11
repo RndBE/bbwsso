@@ -61,7 +61,16 @@
         }
 
         .swagger-ui .topbar { display: none; }
-        .swagger-ui .info { margin: 24px 0; }
+
+        /* Deskripsi sudah disampaikan di header halaman di atas; Swagger UI
+           mengulangnya persis di bawahnya. Disembunyikan dari tampilan saja —
+           teksnya TETAP ADA di dokumen OpenAPI, supaya konsumen non-UI
+           (generator klien, Postman) tetap membaca batasan laju data dan
+           cakupannya. */
+        .swagger-ui .info .description { display: none; }
+
+        /* Beri napas antara header gelap dan judul Swagger UI. */
+        .swagger-ui .info { margin: 0; padding: 44px 0 16px; }
 
         @media (max-width: 640px) {
             #swagger-ui { padding-inline: 0; }
@@ -79,7 +88,8 @@
         <p class="docs-summary">
             Tiga endpoint untuk menarik data pos telemetri: riwayat terbaru satu pos, snapshot
             seluruh pos aktif, dan riwayat per rentang tanggal. Tekan <strong>Authorize</strong>
-            dan masukkan akun web untuk mencoba langsung dari halaman ini.
+            dan masukkan akun web <strong>berlevel admin</strong> untuk mencoba langsung dari
+            halaman ini.
         </p>
         <div class="docs-meta">
             <span>OpenAPI 3.0.3</span>

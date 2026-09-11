@@ -3,11 +3,7 @@
   "info": {
     "title": "API Integrasi BBWS Serayu Opak",
     "version": "1.0.0",
-    "description": "API integrasi data logger telemetri BBWS Serayu Opak (DAS Serayu, Opak, Oyo, Progo, Bogowonto, Luk Ulo, dan sekitarnya).\n\nHalaman dokumentasi ini publik; seluruh endpoint data memerlukan HTTP Basic Authentication memakai akun yang sama dengan login web.\n\n**Catatan laju data.** Logger merekam tiap 10–30 detik, sehingga satu hari saja sudah ribuan baris per pos. Endpoint riwayat karena itu dibatasi jumlah titiknya, dan `range_tanggal` meringkas per jam secara bawaan.\n\n**Cakupan.** Hanya pos milik BBWS Serayu Opak. Pos titipan DPUPESDM DIY tidak termasuk di sini — pos tersebut dilayani sistem DPUPESDM sendiri.\n\n**Akun.** Endpoint memakai akun web berlevel `admin`. Akun `user`/`tamu` ditolak.",
-    "contact": {
-      "name": "BBWS Serayu Opak",
-      "url": "https://bbwsso.monitoring4system.com"
-    }
+    "description": "API integrasi data logger telemetri BBWS Serayu Opak (DAS Serayu, Opak, Oyo, Progo, Bogowonto, Luk Ulo, dan sekitarnya).\n\nHalaman dokumentasi ini publik; seluruh endpoint data memerlukan HTTP Basic Authentication memakai akun yang sama dengan login web.\n\n**Catatan laju data.** Logger merekam tiap 10–30 detik, sehingga satu hari saja sudah ribuan baris per pos. Endpoint riwayat karena itu dibatasi jumlah titiknya, dan `range_tanggal` meringkas per jam secara bawaan.\n\n**Cakupan.** Hanya pos milik BBWS Serayu Opak. Pos titipan DPUPESDM DIY tidak termasuk di sini — pos tersebut dilayani sistem DPUPESDM sendiri.\n\n**Akun.** Endpoint memakai akun web berlevel `admin`. Akun `user`/`tamu` ditolak."
   },
   "servers": [
     {
