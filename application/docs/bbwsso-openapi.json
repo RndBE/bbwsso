@@ -1,0 +1,444 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "API Integrasi BBWS Serayu Opak",
+    "version": "1.0.0",
+    "description": "API integrasi data logger telemetri BBWS Serayu Opak (DAS Serayu, Opak, Oyo, Progo, Bogowonto, Luk Ulo, dan sekitarnya).\n\nHalaman dokumentasi ini publik; seluruh endpoint data memerlukan HTTP Basic Authentication memakai akun yang sama dengan login web.\n\n**Catatan laju data.** Logger merekam tiap 10–30 detik, sehingga satu hari saja sudah ribuan baris per pos. Endpoint riwayat karena itu dibatasi jumlah titiknya, dan `range_tanggal` meringkas per jam secara bawaan.\n\n**Cakupan.** Hanya pos milik BBWS Serayu Opak. Pos titipan DPUPESDM DIY tidak termasuk di sini — pos tersebut dilayani sistem DPUPESDM sendiri.\n\n**Akun.** Endpoint memakai akun web berlevel `admin`. Akun `user`/`tamu` ditolak.",
+    "contact": {
+      "name": "BBWS Serayu Opak",
+      "url": "https://bbwsso.monitoring4system.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://bbwsso.monitoring4system.com",
+      "description": "Production"
+    }
+  ],
+  "security": [
+    {
+      "BasicAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Logger",
+      "description": "Data pos telemetri"
+    }
+  ],
+  "paths": {
+    "/integrasi_api": {
+      "get": {
+        "tags": [
+          "Logger"
+        ],
+        "summary": "Riwayat terbaru satu logger",
+        "description": "Mengambil maksimal 300 titik data terbaru dari satu logger, diurutkan dari yang paling baru. Setiap titik memuat seluruh parameter sensor milik pos itu.",
+        "operationId": "loggerTerbaru",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdLogger"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Data ditemukan, atau logger tidak terdaftar (`status: false`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SingleLoggerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/integrasi_api/all_logger": {
+      "get": {
+        "tags": [
+          "Logger"
+        ],
+        "summary": "Snapshot seluruh logger aktif",
+        "description": "Nilai terakhir setiap parameter untuk semua pos pada kategori yang aktif, beserta status koneksi, koordinat, DAS, dan foto pos bila ada.",
+        "operationId": "semuaLogger",
+        "responses": {
+          "200": {
+            "description": "Snapshot seluruh logger aktif",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllLoggerResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/integrasi_api/range_tanggal": {
+      "get": {
+        "tags": [
+          "Logger"
+        ],
+        "summary": "Riwayat satu logger pada rentang tanggal",
+        "description": "Data satu logger dari pukul 00:00 pada `awal` sampai 23:59 pada `akhir`.\n\nPeringkasan mengikuti jenis parameter: yang kumulatif (curah hujan, `tipe_graf = column`) **diakumulasi**, sisanya **dirata-rata** — aturan yang sama dipakai halaman analisa web.\n\nBatas rentang: 31 hari untuk `jam`/`hari`, 2 hari untuk `menit` (data mentah).\n\nInterval `menit` mengembalikan data mentah dan dipotong keras pada 20000 baris; bila terpotong, respons menandainya lewat `terpotong: true`.",
+        "operationId": "loggerRentangTanggal",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdLogger"
+          },
+          {
+            "name": "awal",
+            "in": "query",
+            "required": true,
+            "description": "Tanggal awal, YYYY-MM-DD.",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "example": "2026-09-01"
+            }
+          },
+          {
+            "name": "akhir",
+            "in": "query",
+            "required": true,
+            "description": "Tanggal akhir, YYYY-MM-DD.",
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "example": "2026-09-07"
+            }
+          },
+          {
+            "name": "interval",
+            "in": "query",
+            "required": false,
+            "description": "Peringkasan keluaran. Bawaan `jam`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "menit",
+                "jam",
+                "hari"
+              ],
+              "default": "jam"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Data pada rentang tanggal, atau logger tidak terdaftar (`status: false`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RangeLoggerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BasicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "Akun web BBWS Serayu Opak berlevel `admin`. Akun berlevel `user`/`tamu` ditolak dengan 401, termasuk akun tamu yang dipakai halaman publik. Mitra integrasi sebaiknya diberi akun tersendiri, bukan berbagi akun operator."
+      }
+    },
+    "parameters": {
+      "IdLogger": {
+        "name": "id_logger",
+        "in": "query",
+        "required": true,
+        "description": "ID logger, contoh `10048`.",
+        "schema": {
+          "type": "string",
+          "example": "10048"
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Kredensial tidak dikirim atau salah",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Gagal"
+            },
+            "example": {
+              "status": false,
+              "pesan": "Username atau password salah"
+            }
+          }
+        }
+      },
+      "BadRequest": {
+        "description": "Parameter kurang atau tidak sah",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Gagal"
+            },
+            "example": {
+              "status": false,
+              "pesan": "Parameter id_logger wajib diisi"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Gagal": {
+        "type": "object",
+        "required": [
+          "status",
+          "pesan"
+        ],
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": false
+          },
+          "pesan": {
+            "type": "string"
+          }
+        }
+      },
+      "ParameterSnapshot": {
+        "type": "object",
+        "required": [
+          "nama_parameter",
+          "satuan",
+          "nilai"
+        ],
+        "properties": {
+          "nama_parameter": {
+            "type": "string",
+            "example": "Tinggi_Muka_Air"
+          },
+          "satuan": {
+            "type": "string",
+            "example": "m"
+          },
+          "nilai": {
+            "type": "number",
+            "example": 1.245,
+            "description": "null bila logger belum pernah mengirim nilai untuk sensor ini.",
+            "nullable": true
+          }
+        }
+      },
+      "TitikRiwayat": {
+        "type": "object",
+        "required": [
+          "waktu",
+          "data"
+        ],
+        "properties": {
+          "waktu": {
+            "type": "string",
+            "example": "2026-09-11 07:00:00"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParameterSnapshot"
+            }
+          }
+        }
+      },
+      "SingleLoggerResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": true
+          },
+          "foto": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://bbws.beacontelemetry.com/image/foto_pos/surotrunan.jpg",
+            "nullable": true
+          },
+          "nama_lokasi": {
+            "type": "string",
+            "example": "Pos ARR Surotrunan"
+          },
+          "koneksi_logger": {
+            "type": "string",
+            "enum": [
+              "Terhubung",
+              "Terputus"
+            ]
+          },
+          "latitude": {
+            "type": "string",
+            "example": "-7.67796"
+          },
+          "longitude": {
+            "type": "string",
+            "example": "110.45044"
+          },
+          "jenis": {
+            "type": "string",
+            "example": "ARR"
+          },
+          "jumlah_data": {
+            "type": "integer",
+            "example": 300
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TitikRiwayat"
+            }
+          }
+        }
+      },
+      "LoggerSnapshot": {
+        "type": "object",
+        "properties": {
+          "id_logger": {
+            "type": "string",
+            "example": "10048"
+          },
+          "foto": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "nama_lokasi": {
+            "type": "string"
+          },
+          "das": {
+            "type": "string",
+            "example": "Serayu"
+          },
+          "waktu": {
+            "type": "string",
+            "example": "2026-09-11 07:42:00",
+            "nullable": true
+          },
+          "koneksi_logger": {
+            "type": "string",
+            "enum": [
+              "Terhubung",
+              "Terputus"
+            ]
+          },
+          "latitude": {
+            "type": "string"
+          },
+          "longitude": {
+            "type": "string"
+          },
+          "jenis": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParameterSnapshot"
+            }
+          }
+        }
+      },
+      "AllLoggerResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": true
+          },
+          "jumlah_logger": {
+            "type": "integer",
+            "example": 53
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LoggerSnapshot"
+            }
+          }
+        }
+      },
+      "RangeLoggerResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "example": true
+          },
+          "nama_lokasi": {
+            "type": "string"
+          },
+          "koneksi_logger": {
+            "type": "string",
+            "enum": [
+              "Terhubung",
+              "Terputus"
+            ]
+          },
+          "latitude": {
+            "type": "string"
+          },
+          "longitude": {
+            "type": "string"
+          },
+          "jenis": {
+            "type": "string"
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "menit",
+              "jam",
+              "hari"
+            ]
+          },
+          "awal": {
+            "type": "string",
+            "format": "date"
+          },
+          "akhir": {
+            "type": "string",
+            "format": "date"
+          },
+          "jumlah_data": {
+            "type": "integer"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TitikRiwayat"
+            }
+          },
+          "terpotong": {
+            "type": "boolean",
+            "description": "true bila hasil dipotong pada batas 20000 baris (hanya mungkin pada interval `menit`).",
+            "example": false
+          }
+        }
+      }
+    }
+  }
+}
