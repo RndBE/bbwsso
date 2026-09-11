@@ -7,6 +7,16 @@
   # then use
   # RewriteBase /mypage/test1/
   RewriteBase /
+
+  # Teruskan header Authorization ke PHP.
+  # Dengan PHP-FPM/FastCGI, Apache TIDAK meneruskan header ini sendiri, jadi
+  # PHP_AUTH_USER tidak pernah terisi dan HTTP Basic Auth selalu terbaca
+  # "kredensial tidak dikirim" — walau klien mengirimnya dengan benar.
+  # Karena request dibelokkan ke index.php, PHP membacanya sebagai
+  # REDIRECT_HTTP_AUTHORIZATION; Basic_auth memeriksa kedua nama itu.
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^(.*)$ index.php?/$1 
