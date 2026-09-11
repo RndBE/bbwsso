@@ -55,7 +55,9 @@
 
         #swagger-ui {
             max-width: 1180px;
-            margin: 0 auto;
+            /* Beri jarak supaya latar halaman terlihat sebagai celah antara
+               pita gelap dan panel putih, bukan dua blok yang berdempetan. */
+            margin: 28px auto 0;
             padding-inline: 16px;
             background: var(--kertas);
         }
@@ -87,14 +89,12 @@
         <h1 class="docs-title">API Integrasi BBWS Serayu Opak</h1>
         <p class="docs-summary">
             Tiga endpoint untuk menarik data pos telemetri: riwayat terbaru satu pos, snapshot
-            seluruh pos aktif, dan riwayat per rentang tanggal. Tekan <strong>Authorize</strong>
-            dan masukkan akun web <strong>berlevel admin</strong> untuk mencoba langsung dari
-            halaman ini.
+            seluruh pos aktif, dan riwayat per rentang tanggal.
         </p>
         <div class="docs-meta">
             <span>OpenAPI 3.0.3</span>
             <span>·</span>
-            <span>HTTP Basic Auth</span>
+            <span>HTTP Basic Auth &middot; akun admin</span>
             <span>·</span>
             <a href="<?php echo site_url('integrasi_api/openapi'); ?>">Buka raw OpenAPI JSON</a>
         </div>
