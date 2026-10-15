@@ -280,46 +280,6 @@ class Datamasuk extends CI_Controller
 				}
 			}
 		}
-		###### BBWS #######
-		if ($this->input->post('id_alat') == '10223') {
-			$dt_new = $this->db->select('waktu,sensor1 as tma')->distinct('waktu')->where('code_logger', '10223')->order_by('waktu', 'desc')->limit(30)->get($tabel->tabel_main)->result_array();
-			$timestamps = [];
-			$sensor1 = [];
-			foreach ($dt_new as $k => $vp) {
-				array_push($timestamps, $vp['waktu']);
-				array_push($sensor1, $vp['tma']);
-			}
-			$dt_ar = [
-				'timestamps' => $timestamps,
-				'sensor1' => $sensor1
-			];
-
-			$dt_send = $dt_ar;
-			// URL API tujuan
-			$url = "http://31.58.158.182/dpupesdm/datamasuk/receive_dt";
-			$ch = curl_init($url);
-
-			curl_setopt_array($ch, [
-				CURLOPT_POST => true,
-				CURLOPT_POSTFIELDS => json_encode($dt_send), // kirim sebagai JSON mentah
-				CURLOPT_HTTPHEADER => [
-					'Content-Type: application/json',
-					'Content-Length: ' . strlen(json_encode($dt_send))
-				],
-				CURLOPT_RETURNTRANSFER => true
-			]);
-
-			// Eksekusi request
-			$response = curl_exec($ch);
-
-			// Cek error
-			if ($response === false) {
-				echo "cURL Error: " . curl_error($ch);
-			} else {
-				echo $response;
-			}
-			//$this->db->insert('tes_data',$data);
-		}
 		########## KIRIM KE HIDROLOGI BBWSSO ##########
 		$postDataBbws = http_build_query($databbws);
 		$optionsBbws = array(
