@@ -894,13 +894,7 @@ class Integrasi extends CI_Controller
 		$out = [];
 		foreach ($rows as $r) {
 			$id_logger = $r->id_logger;
-			// kabupaten = parse alamat sederhana (cari "Kabupaten X" atau "Kulon Progo, DIY")
-			$kabupaten = '';
-			if (preg_match('/Kabupaten\s+([^,]+)/i', $r->alamat, $m)) {
-				$kabupaten = trim($m[1]);
-			} elseif (preg_match('/,\s*([^,]+)\s*,\s*(DIY|Daerah\s+Istimewa\s+Yogyakarta)/i', $r->alamat, $m)) {
-				$kabupaten = trim($m[1]);
-			}
+			$kabupaten = $this->_kabupaten($r->alamat);
 
 			$dt = $this->db->where('code_logger', $id_logger)->get($r->temp_data)->row();
 			$waktu = $dt ? $dt->waktu : null;
@@ -1081,6 +1075,347 @@ class Integrasi extends CI_Controller
 			$out['status'] = 'perbaikan';
 		}
 		echo json_encode($out);
+	}
+
+	// ─── GO HIDRO (dipanggil DPUPESDM Hmi, server-ke-server) ───────────
+
+	/** Batas bucket satu permintaan hmi_seri, sama dengan Hmi::MAKS_BUCKET (90 hari per jam). */
+	const HMI_MAKS_BUCKET = 2200;
+	const HMI_MAKS_SERI = 16;
+
+	/** Format bucket, identik dengan hmi_bucket() di DPUPESDM supaya label langsung cocok dengan grid Hmi. */
+	private static $hmi_bucket = [
+		'menit' => '%Y-%m-%d %H:%i:00',
+		'jam' => '%Y-%m-%d %H:00:00',
+		'hari' => '%Y-%m-%d 00:00:00',
+	];
+	private static $hmi_detik = ['menit' => 60, 'jam' => 3600, 'hari' => 86400];
+
+	/**
+	 * GET /integrasi/hmi_pos
+	 *
+	 * Seluruh 7 pos DIY dalam satu respons untuk roster GO HIDRO: metadata, status perbaikan,
+	 * bacaan terakhir (debit sudah dihitung), akumulasi hujan jam berjalan dan sejak 00:00, dan
+	 * info perangkat. Query per tabel, bukan per pos (beranda() di atas ±2 dtk karena per pos).
+	 *
+	 * {status, waktu, data: [{id, nama, jenis: awlr|arr|awr, das, alamat, kabupaten, lat, lng,
+	 *   perbaikan, waktu, parameter: [{kode, nama, satuan, utama, nilai, jam?, hari?}],
+	 *   info: {foto (URL), seri, sensor, nosell, nama_pic, no_pic}}]}
+	 *
+	 * `kode` unik per pos: kolom_sensor, atau "debit" untuk debit turunan (kolomnya bisa dipakai
+	 * bersama TMA). Kode ini yang diminta hmi_seri. jam/hari hanya untuk parameter bersatuan mm.
+	 * Nilai kosong = null; debit tanpa rating curve yang berlaku = null (bukan nilai TMA mentah).
+	 */
+	public function hmi_pos()
+	{
+		$sekarang = time();
+		$rows = $this->db
+			->select('t_logger.id_logger, t_logger.tabel_main, t_lokasi.nama_lokasi, t_lokasi.latitude, t_lokasi.longitude,'
+				. ' t_lokasi.alamat, t_lokasi.das, kategori_logger.tabel AS jenis, kategori_logger.temp_data,'
+				. ' t_informasi.seri_logger, t_informasi.sensor, t_informasi.nosell, t_informasi.nama_pic, t_informasi.no_pic')
+			->from('t_logger')
+			->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
+			->join('kategori_logger', 'kategori_logger.id_katlogger = t_logger.kategori_log')
+			->join('t_informasi', 't_informasi.logger_id = t_logger.id_logger', 'left')
+			->where_in('t_logger.id_logger', $this->diy_loggers)
+			->order_by('t_logger.id_logger', 'ASC')
+			->get()->result_array();
+
+		// t_informasi bisa ganda per logger: ambil baris pertama
+		$log = [];
+		foreach ($rows as $r) {
+			if (!isset($log[$r['id_logger']]) && $this->_hmi_ident($r['tabel_main']) && $this->_hmi_ident($r['temp_data'])) {
+				$log[$r['id_logger']] = $r;
+			}
+		}
+		$ids = array_map('strval', array_keys($log));
+		$param = $this->_hmi_param($ids);
+
+		// Baris terakhir: satu query per tabel temp, waktu terbaru per logger
+		$terakhir = [];
+		foreach ($this->_hmi_per_tabel($log, 'temp_data') as $tabel => $daftar) {
+			foreach ($this->db->where_in('code_logger', $daftar)->get($tabel)->result_array() as $r) {
+				$id = (string) $r['code_logger'];
+				if (!isset($terakhir[$id]) || $r['waktu'] > $terakhir[$id]['waktu']) {
+					$terakhir[$id] = $r;
+				}
+			}
+		}
+
+		// Akumulasi hujan: satu query per tabel data untuk semua kolom mm, sejak 00:00 hari ini
+		$hujan = [];
+		$jam0 = $this->db->escape(date('Y-m-d H:00:00', $sekarang));
+		foreach ($this->_hmi_per_tabel($log, 'tabel_main') as $tabel => $daftar) {
+			$kolom = [];
+			foreach ($daftar as $id) {
+				foreach (isset($param[$id]) ? $param[$id] : [] as $p) {
+					if ($this->_hmi_jumlah($p)) $kolom[$p['kolom']] = true;
+				}
+			}
+			if (!$kolom) continue;
+			$sel = 'code_logger';
+			foreach (array_keys($kolom) as $k) {
+				$sel .= ", SUM(`$k`) AS `h_$k`, SUM(IF(waktu >= $jam0, `$k`, 0)) AS `j_$k`";
+			}
+			$sql = "SELECT $sel FROM `$tabel` WHERE code_logger IN ? AND waktu BETWEEN ? AND ? GROUP BY code_logger";
+			foreach ($this->db->query($sql, [$daftar, date('Y-m-d 00:00:00', $sekarang), date('Y-m-d H:i:59', $sekarang)])->result_array() as $r) {
+				$hujan[(string) $r['code_logger']] = $r;
+			}
+		}
+
+		$perbaikan = [];
+		if ($ids) {
+			foreach ($this->db->select('id_logger')->where_in('id_logger', $ids)->get('t_perbaikan')->result_array() as $r) {
+				$perbaikan[(string) $r['id_logger']] = true;
+			}
+		}
+
+		$foto = [];
+		if ($ids) {
+			$q = $this->db->where_in('id_logger', $ids)->order_by('foto_utama', 'DESC')->order_by('id', 'ASC')->get('foto_pos')->result_array();
+			foreach ($q as $r) {
+				if (!isset($foto[$r['id_logger']]) && $r['url_foto'] !== '') {
+					$foto[$r['id_logger']] = 'https://bbws.beacontelemetry.com/image/foto_pos/' . rawurlencode(basename($r['url_foto']));
+				}
+			}
+		}
+
+		$data = [];
+		foreach ($log as $id => $l) {
+			$id = (string) $id;
+			$baris = isset($terakhir[$id]) ? $terakhir[$id] : null;
+
+			$parameter = [];
+			foreach (isset($param[$id]) ? $param[$id] : [] as $p) {
+				$item = [
+					'kode' => $p['kode'],
+					'nama' => $p['nama'],
+					'satuan' => $p['satuan'],
+					'utama' => $p['utama'],
+					'nilai' => $baris ? $this->_hmi_nilai_baris($id, $p, $baris) : null,
+				];
+				if ($this->_hmi_jumlah($p)) {
+					$h = isset($hujan[$id]) ? $hujan[$id] : null;
+					$item['jam'] = $h ? $this->_hmi_angka($h['j_' . $p['kolom']]) : null;
+					$item['hari'] = $h ? $this->_hmi_angka($h['h_' . $p['kolom']]) : null;
+				}
+				$parameter[] = $item;
+			}
+
+			$data[] = [
+				'id' => $id,
+				'nama' => $l['nama_lokasi'],
+				'jenis' => $l['jenis'],
+				'das' => $l['das'],
+				'alamat' => $l['alamat'],
+				'kabupaten' => $this->_kabupaten($l['alamat']),
+				'lat' => $this->_hmi_angka($l['latitude'], 7),
+				'lng' => $this->_hmi_angka($l['longitude'], 7),
+				'perbaikan' => isset($perbaikan[$id]),
+				'waktu' => $baris ? $baris['waktu'] : null,
+				'parameter' => $parameter,
+				'info' => [
+					'foto' => isset($foto[$id]) ? $foto[$id] : null,
+					'seri' => $l['seri_logger'],
+					'sensor' => $l['sensor'],
+					'nosell' => $l['nosell'],
+					'nama_pic' => $l['nama_pic'],
+					'no_pic' => $l['no_pic'],
+				],
+			];
+		}
+
+		$this->_hmi_json(['status' => true, 'waktu' => date('Y-m-d H:i:s', $sekarang), 'data' => $data]);
+	}
+
+	/**
+	 * GET /integrasi/hmi_seri?seri=10044:sensor1,10093:sensor9&awal=Y-m-d H:i:s&akhir=Y-m-d H:i:s&interval=menit|jam|hari&stat=1
+	 *
+	 * Deret teragregasi per bucket untuk Analisa, Monitoring, dan Ketersediaan GO HIDRO. `kode` dari
+	 * hmi_pos. Satuan mm dijumlah, lainnya dirata-rata; debit dihitung dari agregat TMA (rating curve)
+	 * atau beda sensor1 - sensor2 (Debit_Aliran_Sungai), sama dengan halaman analisa.
+	 * Satu query per pos untuk semua kodenya. Bucket tanpa data tidak dikirim.
+	 *
+	 * {status, interval, data: {id: {kode: {bucket: nilai | [nilai, min, maks, n] bila stat=1}}}}
+	 */
+	public function hmi_seri()
+	{
+		$interval = (string) $this->input->get('interval');
+		$awal = $this->_hmi_waktu($this->input->get('awal'));
+		$akhir = $this->_hmi_waktu($this->input->get('akhir'));
+		$stat = (string) $this->input->get('stat') === '1';
+
+		if (!isset(self::$hmi_bucket[$interval])) {
+			return $this->_hmi_json(['status' => false, 'message' => 'interval harus menit, jam, atau hari'], 400);
+		}
+		if ($awal === null || $akhir === null || $awal > $akhir) {
+			return $this->_hmi_json(['status' => false, 'message' => 'awal dan akhir harus YYYY-MM-DD HH:MM:SS, awal <= akhir'], 400);
+		}
+		if (($akhir - $awal) / self::$hmi_detik[$interval] > self::HMI_MAKS_BUCKET) {
+			return $this->_hmi_json(['status' => false, 'message' => 'Rentang terlalu panjang (maks ' . self::HMI_MAKS_BUCKET . ' bucket)'], 400);
+		}
+
+		$refs = array_values(array_filter(array_map('trim', explode(',', (string) $this->input->get('seri'))), 'strlen'));
+		if (!$refs || count($refs) > self::HMI_MAKS_SERI) {
+			return $this->_hmi_json(['status' => false, 'message' => 'seri wajib diisi, format id:kode, maks ' . self::HMI_MAKS_SERI], 400);
+		}
+		$minta = [];
+		foreach ($refs as $ref) {
+			$b = explode(':', $ref, 2);
+			if (count($b) !== 2 || !$this->_is_diy($b[0])) {
+				return $this->_hmi_json(['status' => false, 'message' => 'Pos tidak diizinkan: ' . $ref], 403);
+			}
+			$minta[$b[0]][$b[1]] = true;
+		}
+
+		$tabel = [];
+		$q = $this->db->select('id_logger, tabel_main')->where_in('id_logger', array_map('strval', array_keys($minta)))->get('t_logger')->result_array();
+		foreach ($q as $r) {
+			if ($this->_hmi_ident($r['tabel_main'])) $tabel[(string) $r['id_logger']] = $r['tabel_main'];
+		}
+		$param = $this->_hmi_param(array_map('strval', array_keys($minta)));
+
+		$fmt = $this->db->escape(self::$hmi_bucket[$interval]);
+		$data = [];
+		foreach ($minta as $id => $kode) {
+			$id = (string) $id;
+			$pilih = [];
+			foreach (isset($param[$id]) ? $param[$id] : [] as $p) {
+				if (isset($kode[$p['kode']])) $pilih[] = $p;
+			}
+			if (!isset($tabel[$id]) || count($pilih) !== count($kode)) {
+				return $this->_hmi_json(['status' => false, 'message' => 'Parameter tidak ada pada pos ' . $id], 404);
+			}
+
+			$sel = "DATE_FORMAT(waktu, $fmt) AS bk";
+			foreach ($pilih as $i => $p) {
+				$x = $p['debit'] === 'beda' ? '(`sensor1` - `sensor2`)' : '`' . $p['kolom'] . '`';
+				$sel .= ', ' . ($this->_hmi_jumlah($p) ? 'SUM' : 'AVG') . "($x) AS v$i";
+				if ($stat) $sel .= ", MIN($x) AS lo$i, MAX($x) AS hi$i, COUNT($x) AS n$i";
+			}
+			$sql = "SELECT $sel FROM `{$tabel[$id]}` WHERE code_logger = ? AND waktu BETWEEN ? AND ? GROUP BY bk ORDER BY bk";
+
+			$data[$id] = [];
+			foreach ($pilih as $p) $data[$id][$p['kode']] = new stdClass();
+			foreach ($this->db->query($sql, [$id, date('Y-m-d H:i:s', $awal), date('Y-m-d H:i:s', $akhir)])->result_array() as $r) {
+				foreach ($pilih as $i => $p) {
+					$v = $this->_hmi_debit($id, $p, $r["v$i"]);
+					if ($stat) {
+						// lengkung debit tidak selalu monoton (tabel Bogowonto turun di 4,2 m): urutkan lagi setelah dipetakan
+						$a = $this->_hmi_debit($id, $p, $r["lo$i"]);
+						$b = $this->_hmi_debit($id, $p, $r["hi$i"]);
+						$lo = ($a === null || $b === null) ? null : min($a, $b);
+						$hi = ($a === null || $b === null) ? null : max($a, $b);
+						$v = [$v, $lo, $hi, (int) $r["n$i"]];
+					}
+					$data[$id][$p['kode']]->{$r['bk']} = $v;
+				}
+			}
+		}
+
+		$this->_hmi_json(['status' => true, 'interval' => $interval, 'data' => $data]);
+	}
+
+	/**
+	 * Parameter tiap logger: id => [{kode, kolom, nama, satuan, utama, debit: null|rating|beda}], urut kolom.
+	 * Debit dikenali dari nama_parameter, aturan yang sama dengan beranda() dan _apply_debit().
+	 */
+	private function _hmi_param($ids)
+	{
+		if (!$ids) return [];
+		$rows = $this->db->where_in('logger_id', $ids)
+			->order_by('CAST(SUBSTR(kolom_sensor,7) AS UNSIGNED)', '', false)
+			->order_by('id_param', 'ASC')
+			->get('parameter_sensor')->result_array();
+
+		$out = [];
+		$pakai = [];
+		foreach ($rows as $r) {
+			if (!preg_match('/^sensor\d{1,2}$/', $r['kolom_sensor'])) continue;
+			$id = (string) $r['logger_id'];
+			$debit = $r['nama_parameter'] === 'Debit' ? 'rating' : ($r['nama_parameter'] === 'Debit_Aliran_Sungai' ? 'beda' : null);
+			$kode = $debit ? 'debit' : $r['kolom_sensor'];
+			if (isset($pakai[$id][$kode])) $kode = 'p' . $r['id_param'];
+			$pakai[$id][$kode] = true;
+			$out[$id][] = [
+				'kode' => $kode,
+				'kolom' => $r['kolom_sensor'],
+				'nama' => $r['nama_parameter'],
+				'satuan' => $r['satuan'],
+				'utama' => (string) $r['parameter_utama'] === '1',
+				'debit' => $debit,
+			];
+		}
+		return $out;
+	}
+
+	/** Nilai satu parameter dari satu baris data mentah (bacaan terakhir). */
+	private function _hmi_nilai_baris($id, $p, $baris)
+	{
+		if ($p['debit'] === 'beda') {
+			if (!isset($baris['sensor1'], $baris['sensor2'])) return null;
+			return $this->_hmi_debit($id, $p, (float) $baris['sensor1'] - (float) $baris['sensor2']);
+		}
+		return isset($baris[$p['kolom']]) ? $this->_hmi_debit($id, $p, $baris[$p['kolom']]) : null;
+	}
+
+	/** Pasang debit pada nilai TMA (atau beda TMA); parameter lain hanya dirapikan. */
+	private function _hmi_debit($id, $p, $v)
+	{
+		if ($v === null || !is_numeric($v)) return null;
+		if ($p['debit'] === 'rating') {
+			$q = $this->_hitung_debit_rating_curve($id, (float) $v);
+			return $q === null ? null : $this->_hmi_angka(max(0, $q));
+		}
+		if ($p['debit'] === 'beda') return $this->_hmi_angka($this->_debit_interpolation((float) $v));
+		return $this->_hmi_angka($v);
+	}
+
+	/** Parameter akumulatif: bersatuan mm dan bukan debit. Dijumlah per periode, lainnya dirata-rata. */
+	private function _hmi_jumlah($p)
+	{
+		return !$p['debit'] && strtolower(trim($p['satuan'])) === 'mm';
+	}
+
+	/** Logger dikelompokkan per tabel ($kolom = tabel_main | temp_data): tabel => [id]. */
+	private function _hmi_per_tabel($log, $kolom)
+	{
+		$out = [];
+		foreach ($log as $id => $l) $out[$l[$kolom]][] = (string) $id;
+		return $out;
+	}
+
+	private function _hmi_angka($v, $desimal = 4)
+	{
+		return ($v === null || $v === '' || !is_numeric($v) || !is_finite((float) $v)) ? null : round((float) $v, $desimal);
+	}
+
+	/** "Y-m-d H:i:s" -> timestamp, null bila tak valid. */
+	private function _hmi_waktu($teks)
+	{
+		$d = DateTime::createFromFormat('!Y-m-d H:i:s', (string) $teks);
+		return ($d && $d->format('Y-m-d H:i:s') === $teks) ? $d->getTimestamp() : null;
+	}
+
+	/** Nama tabel dari DB tetap divalidasi sebelum masuk SQL mentah. */
+	private function _hmi_ident($nama)
+	{
+		return is_string($nama) && preg_match('/^[A-Za-z0-9_]{1,64}$/', $nama);
+	}
+
+	private function _hmi_json($data, $kode = 200)
+	{
+		http_response_code($kode);
+		header('Cache-Control: no-store');
+		echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PARTIAL_OUTPUT_ON_ERROR);
+	}
+
+	/** Kabupaten dari teks alamat ("Kabupaten X" atau "..., X, DIY"); kosong bila tak dikenali. */
+	private function _kabupaten($alamat)
+	{
+		if (preg_match('/Kabupaten\s+([^,]+)/i', (string) $alamat, $m)) return trim($m[1]);
+		if (preg_match('/,\s*([^,]+)\s*,\s*(DIY|Daerah\s+Istimewa\s+Yogyakarta)/i', (string) $alamat, $m)) return trim($m[1]);
+		return '';
 	}
 
 	private function _marker_state($icon, $perb, $waktu, $awal, $data_p)
