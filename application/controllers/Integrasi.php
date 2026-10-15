@@ -1092,9 +1092,15 @@ class Integrasi extends CI_Controller
 	private static $hmi_detik = ['menit' => 60, 'jam' => 3600, 'hari' => 86400];
 
 	/**
+	 * Pos yang tampil di GO HIDRO: whitelist DIY di atas tanpa 10247 (AWLR Bogowonto), yang lokasinya sudah
+	 * di luar Provinsi DIY. Endpoint lama /integrasi/* tetap memakai $diy_loggers.
+	 */
+	private static $hmi_loggers = ['10044', '10093', '10223', '10250', '10289', '10348'];
+
+	/**
 	 * GET /integrasi/hmi_pos
 	 *
-	 * Seluruh 7 pos DIY dalam satu respons untuk roster GO HIDRO: metadata, status perbaikan,
+	 * Seluruh pos GO HIDRO ($hmi_loggers) dalam satu respons: metadata, status perbaikan,
 	 * bacaan terakhir (debit sudah dihitung), akumulasi hujan jam berjalan dan sejak 00:00, dan
 	 * info perangkat. Query per tabel, bukan per pos (beranda() di atas ±2 dtk karena per pos).
 	 *
@@ -1117,7 +1123,7 @@ class Integrasi extends CI_Controller
 			->join('t_lokasi', 't_lokasi.idlokasi = t_logger.lokasi_logger')
 			->join('kategori_logger', 'kategori_logger.id_katlogger = t_logger.kategori_log')
 			->join('t_informasi', 't_informasi.logger_id = t_logger.id_logger', 'left')
-			->where_in('t_logger.id_logger', $this->diy_loggers)
+			->where_in('t_logger.id_logger', self::$hmi_loggers)
 			->order_by('t_logger.id_logger', 'ASC')
 			->get()->result_array();
 
@@ -1262,7 +1268,7 @@ class Integrasi extends CI_Controller
 		$minta = [];
 		foreach ($refs as $ref) {
 			$b = explode(':', $ref, 2);
-			if (count($b) !== 2 || !$this->_is_diy($b[0])) {
+			if (count($b) !== 2 || !in_array($b[0], self::$hmi_loggers, true)) {
 				return $this->_hmi_json(['status' => false, 'message' => 'Pos tidak diizinkan: ' . $ref], 403);
 			}
 			$minta[$b[0]][$b[1]] = true;
