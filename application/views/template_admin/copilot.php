@@ -1223,6 +1223,7 @@
                 // Wrap tables in scrollable container + inject CSV button
                 var tables = div.querySelectorAll('table');
                 tables.forEach(function (tbl, idx) {
+                    tbl.querySelectorAll('td').forEach(copilotWarnaiHujan);
                     var wrap = document.createElement('div');
                     wrap.className = 'copilot-table-wrap';
                     tbl.parentNode.insertBefore(wrap, tbl);
@@ -1258,6 +1259,29 @@
             }
             body.appendChild(div);
             scrollBottom();
+        }
+
+        // ── Warna klasifikasi hujan di tabel: kode warna legenda menu Analisa
+        //    (views/konten/back/analisa_all.php, v_rekapitulasi.php). Warna teks dipilih agar terbaca. ──
+        var COPILOT_WARNA_HUJAN = [
+            // [awal teks sel, latar, teks]
+            [/^hujan sangat lebat\b/, '#ed1c24', '#fff'],                       // merah
+            [/^hujan lebat\b/, '#f47e2c', '#1b1b1b'],                           // oranye
+            [/^hujan sedang\b/, '#fef216', '#1b1b1b'],                          // kuning
+            [/^hujan sangat ringan\b/, '#70cddd', '#1b1b1b'],                   // cyan
+            [/^hujan ringan\b/, '#35549d', '#fff'],                             // nila
+            [/^(berawan \/ )?tidak hujan\b|^berawan\b/, '#84c450', '#1b1b1b']   // hijau
+        ];
+        function copilotWarnaiHujan(td) {
+            var t = td.textContent.trim().toLowerCase().replace(/\s+/g, ' ');
+            for (var i = 0; i < COPILOT_WARNA_HUJAN.length; i++) {
+                if (COPILOT_WARNA_HUJAN[i][0].test(t)) {
+                    td.style.background = COPILOT_WARNA_HUJAN[i][1];
+                    td.style.color = COPILOT_WARNA_HUJAN[i][2];
+                    td.style.fontWeight = '600';
+                    return;
+                }
+            }
         }
 
         // ── Export table to CSV ──

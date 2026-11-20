@@ -133,6 +133,24 @@ Definisi: [Chatbot.php:551-834](application/controllers/Chatbot.php#L551-L834)
 - Pos berlevel `Tidak diatur` = ambang belum diisi admin, **bukan** aman.
 - Pertanyaan **data telat/bolong/offline/baterai** → `get_kesehatan_pos` (`get_logger_koneksi` hanya untuk 1 pos).
 
+### Standar klasifikasi hujan
+
+Ada **dua standar**, sama dengan menu Analisa. Angka tepat di batas masuk kelas di atasnya (tepat 5 mm/jam = Sedang). Diterapkan oleh `_klasifikasi_hujan_jam()` dan `_klasifikasi_hujan_harian()` di [Chatbot.php](application/controllers/Chatbot.php); tes: `php tests/test_klasifikasi_hujan.php`.
+
+| Klasifikasi | Per jam (mm/jam) | Per hari (mm/hari) |
+|---|---|---|
+| Tidak Hujan | 0 | 0 |
+| Sangat Ringan | 0.1 – <1 | 0.1 – <5 |
+| Ringan | 1 – <5 | 5 – <20 |
+| Sedang | 5 – <10 | 20 – <50 |
+| Lebat | 10 – <20 | 50 – <100 |
+| Sangat Lebat | ≥ 20 | ≥ 100 |
+
+- Hujan **sekarang** → `cek_hujan` → `curah_hujan_jam` + `klasifikasi_jam`.
+- Rekap **per hari** (hari ini, kemarin, tanggal X) → `cek_hujan_historis` → `mm` + `klasifikasi`. Pakai `cek_hujan` untuk rekap harian hanya bila terpaksa, dengan `curah_hujan_harian` + `klasifikasi_harian`.
+- Standar per hari hanya untuk total **satu** hari. Total rentang/bulan tidak diklasifikasi (fallback PSDA hanya mengisi `klasifikasi_harian` untuk mode harian).
+- Acuan kode: Analisa.php / Api.php (per jam) dan analisa_all.php / analisa_arr.php / analisa_awr.php (per hari). Tabel "Per Hari" di Pengaturan › Indikator Curah Hujan ([indikator_hujan.php](application/views/konten/back/indikator_hujan.php)) berbeda di dua kelas terbawah (0.1–10 dan 10–20); chatbot mengikuti kode Analisa.
+
 ---
 
 ## 7. System Prompt
@@ -168,6 +186,7 @@ Referensi: [copilot.php](application/views/template_admin/copilot.php)
 - Modal chat dengan render **Markdown** (marked.js).
 - **Grafik** otomatis dari blok ` ```chart ` menggunakan Chart.js.
 - **Tombol Download CSV** otomatis di bawah setiap tabel.
+- **Warna klasifikasi hujan**: sel tabel berawalan `Hujan Sedang`, `Hujan Lebat`, dst. diwarnai otomatis memakai kode warna legenda menu Analisa (hijau `#84c450`, cyan `#70cddd`, nila `#35549d`, kuning `#fef216`, oranye `#f47e2c`, merah `#ed1c24`; sumber [analisa_all.php](application/views/konten/back/analisa_all.php)). Dilakukan di browser berdasarkan teks sel, jadi berlaku untuk semua tabel, bukan hanya hasil `cek_hujan`. Karena itu model diminta menulis klasifikasi persis seperti di response.
 - **Input suara**: rekam audio → `POST /chatbot/transcribe` → teks diisikan ke kolom chat.
 
 ---
@@ -185,6 +204,17 @@ Referensi: [Webhook_wa.php](application/controllers/Webhook_wa.php)
 
 - Sumber utama: **database lokal** sistem monitoring (tabel `t_logger`, `t_lokasi`, `kategori_logger`, tabel data per kategori, `t_perbaikan`, `tingkat_siaga_awlr`, `parameter_sensor`, `rumus_debit`, dll.).
 - **Fallback**: bila logger tidak ada di lokal, sebagian fungsi mengambil dari **API PSDA** (`dpupesdm.monitoring4system.com`).
+
+### Kabupaten/Kota & Kecamatan pada tabel hujan
+
+`cek_hujan` dan `cek_hujan_historis` menambahkan field `kabupaten` dan `kecamatan` di tiap pos. Tidak ada kolom khusus di DB; keduanya diurai dari **teks alamat** oleh [Wilayah.php](application/libraries/Wilayah.php) (tes: `php tests/test_wilayah.php`).
+
+| Pos | Sumber alamat | Cakupan (per 2026-11-20) |
+|---|---|---|
+| PSDA | `dpupesdm.../api/list_logger` (`alamat` + `kabupaten`), 1 request, dicache per-request | 42 dari 42 pos punya kabupaten dan kecamatan |
+| BBWS (lokal) | `t_lokasi.alamat` | Pos DIY: kabupaten 7/7, kecamatan 3/7. Pos non-DIY belum diperiksa |
+
+Alamat diketik manual dengan format campur, jadi kecamatan hanya terisi bila **tertulis** (`Kec. X`, atau gaya "Desa, Kecamatan, Kab, DIY"). Alamat bergaya "Desa, Kabupaten X, Daerah Istimewa Yogyakarta" (mis. 10223, 10247, 10250, 10348) tidak memuat kecamatan, jadi kosong. Kosong bukan tebakan: model diminta menulis `-`. Untuk melengkapinya, perbarui `t_lokasi.alamat` pos terkait.
 
 ---
 

@@ -13,6 +13,7 @@ class Chatbot extends CI_Controller
         $this->config->load('openai', TRUE);
         $this->load->library('DateResolver');
         $this->load->library('siaga');
+        $this->load->library('wilayah');
     }
 
     // ─── Helper: read JSON body (supports internal fake input) ───
@@ -536,7 +537,12 @@ class Chatbot extends CI_Controller
             . "- Gunakan tabel markdown HANYA untuk data yang punya BANYAK BARIS (perbandingan antar waktu/tanggal/pos, data harian, data per-jam, daftar pos, hasil cek_hujan, hasil cek_hujan_historis).\n"
             . "- Setiap tabel otomatis mendapat tombol 'Download CSV'. JANGAN tawarkan ekspor data secara manual, cukup beri tahu user bahwa tombol download tersedia di bawah tabel.\n"
             . "- Saat menampilkan data, SELALU buat ringkasan singkat yang informatif.\n"
-            . "- Untuk data hujan, gunakan klasifikasi yang sudah disediakan di response.\n\n"
+            . "- Untuk data hujan, gunakan klasifikasi yang sudah disediakan di response; JANGAN menghitung sendiri. Tulis klasifikasi PERSIS seperti di response (mis. 'Hujan Sedang'), tanpa tambahan keterangan: UI otomatis mewarnai selnya sesuai warna di menu Analisa.\n"
+            . "- Tabel hasil cek_hujan / cek_hujan_historis: kolom Pos, Kabupaten/Kota, Kecamatan, curah hujan (mm), Klasifikasi. Isi Kabupaten/Kota dan Kecamatan dari field kabupaten dan kecamatan di response; bila kosong tulis '-', JANGAN menebak.\n\n"
+            . "STANDAR KLASIFIKASI HUJAN (sama dengan menu Analisa) — ada DUA, JANGAN dicampur. Angka tepat di batas masuk kelas di atasnya:\n"
+            . "- PER JAM, untuk hujan SEKARANG / saat ini / sedang hujan: Tidak Hujan 0; Sangat Ringan 0.1–1; Ringan 1–5; Sedang 5–10; Lebat 10–20; Sangat Lebat ≥20 mm/jam. Pakai cek_hujan, tampilkan curah_hujan_jam dan klasifikasi_jam.\n"
+            . "- PER HARI, untuk rekap/total/akumulasi satu hari (hari ini, kemarin, tanggal tertentu): Tidak Hujan 0; Sangat Ringan 0.1–5; Ringan 5–20; Sedang 20–50; Lebat 50–100; Sangat Lebat ≥100 mm/hari. Pakai cek_hujan_historis (hari ini = tanggal hari ini), tampilkan mm dan klasifikasi. Jika terpaksa memakai cek_hujan untuk rekap harian, pakai curah_hujan_harian dan klasifikasi_harian, BUKAN klasifikasi_jam.\n"
+            . "- Standar per hari hanya untuk total SATU hari. Jangan menerapkannya pada total beberapa hari atau sebulan.\n\n"
             . "MENAMPILKAN GRAFIK:\n"
             . "- Jika user minta grafik/chart, atau jika data cocok ditampilkan sebagai grafik, gunakan format code block ```chart dengan JSON config.\n"
             . "- Format JSON: {\"type\":\"line\",\"title\":\"Judul\",\"yLabel\":\"Satuan\",\"labels\":[\"08:00\",\"09:00\",...],\"datasets\":[{\"label\":\"Nama\",\"data\":[1,2,...]}]}\n"
@@ -571,7 +577,7 @@ class Chatbot extends CI_Controller
                 'type' => 'function',
                 'function' => [
                     'name' => 'cek_hujan',
-                    'description' => 'Mengecek kondisi hujan/curah hujan SAAT INI (LIVE/REALTIME) di semua pos ARR dan AWS. JANGAN gunakan untuk data historis! Gunakan cek_hujan_historis untuk data tanggal tertentu.',
+                    'description' => 'Mengecek kondisi hujan/curah hujan SAAT INI (LIVE/REALTIME) di semua pos ARR dan AWS. JANGAN gunakan untuk data historis! Gunakan cek_hujan_historis untuk data tanggal tertentu. Hasil memuat klasifikasi_jam (standar PER JAM, untuk hujan sekarang) dan klasifikasi_harian (standar PER HARI, akumulasi sejak 00:00).',
                     'parameters' => [
                         'type' => 'object',
                         'properties' => [
@@ -589,7 +595,7 @@ class Chatbot extends CI_Controller
                 'type' => 'function',
                 'function' => [
                     'name' => 'cek_hujan_historis',
-                    'description' => 'Mengecek data curah hujan HISTORIS di semua pos ARR dan AWS pada tanggal tertentu. Mengembalikan akumulasi curah hujan harian dan klasifikasi untuk setiap pos. Gunakan jika pengguna bertanya hujan pada tanggal tertentu, misalnya "hujan kemarin", "curah hujan tanggal 28 Feb", "tampilkan curah hujan di seluruh pos tanggal X".',
+                    'description' => 'Mengecek data curah hujan HISTORIS di semua pos ARR dan AWS pada tanggal tertentu. Mengembalikan akumulasi curah hujan harian dan klasifikasi (standar PER HARI) untuk setiap pos. Gunakan untuk rekap/total hujan per hari, misalnya "rekap hujan hari ini" (tanggal = hari ini), "hujan kemarin", "curah hujan tanggal 28 Feb", "tampilkan curah hujan di seluruh pos tanggal X".',
                     'parameters' => [
                         'type' => 'object',
                         'properties' => [
@@ -1103,7 +1109,7 @@ class Chatbot extends CI_Controller
             $tabel_temp = $kat->temp_data;
 
             $query_logger = $this->db->query("
-                SELECT t_logger.*, t_lokasi.nama_lokasi, t_lokasi.latitude, t_lokasi.longitude
+                SELECT t_logger.*, t_lokasi.nama_lokasi, t_lokasi.latitude, t_lokasi.longitude, t_lokasi.alamat
                 FROM t_logger
                 INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi
                 WHERE kategori_log = '{$kat->id_katlogger}'
@@ -1158,11 +1164,14 @@ class Chatbot extends CI_Controller
                 $klas_jam = $this->_klasifikasi_hujan_jam($val_jam);
                 $klas_hari = $this->_klasifikasi_hujan_harian($val_hari);
                 $is_hujan = ($val_jam > 0);
+                $wil = $this->wilayah->parse($lok->alamat);
 
                 if ($is_hujan) {
                     $pos_hujan[] = [
                         'id_logger' => $id_logger,
                         'lokasi' => $lok->nama_lokasi,
+                        'kabupaten' => $wil['kabupaten'],
+                        'kecamatan' => $wil['kecamatan'],
                         'curah_hujan_jam' => number_format($val_jam, 2, '.', ''),
                         'klasifikasi_jam' => $klas_jam,
                         'curah_hujan_harian' => number_format($val_hari, 2, '.', ''),
@@ -1174,6 +1183,8 @@ class Chatbot extends CI_Controller
                         $pos_hujan[] = [
                             'id_logger' => $id_logger,
                             'lokasi' => $lok->nama_lokasi,
+                            'kabupaten' => $wil['kabupaten'],
+                            'kecamatan' => $wil['kecamatan'],
                             'curah_hujan_jam' => '0.00',
                             'klasifikasi_jam' => $klas_jam,
                             'curah_hujan_harian' => number_format($val_hari, 2, '.', ''),
@@ -1216,9 +1227,12 @@ class Chatbot extends CI_Controller
                 }
 
                 if ($is_hujan || $filter === 'semua') {
+                    $wil = $this->_wilayah_psda($pid);
                     $pos_hujan[] = [
                         'id_logger' => $pid,
                         'lokasi' => $p['lokasi'] ?? '',
+                        'kabupaten' => $wil['kabupaten'],
+                        'kecamatan' => $wil['kecamatan'],
                         'curah_hujan_jam' => number_format($val_jam, 2, '.', ''),
                         'klasifikasi_jam' => $this->_klasifikasi_hujan_jam($val_jam),
                         'curah_hujan_harian' => number_format($val_hari, 2, '.', ''),
@@ -1277,7 +1291,7 @@ class Chatbot extends CI_Controller
         $local_ids = [];
         foreach ($query_kat->result() as $kat) {
             $query_logger = $this->db->query("
-                SELECT t_logger.*, t_lokasi.nama_lokasi, t_lokasi.latitude, t_lokasi.longitude
+                SELECT t_logger.*, t_lokasi.nama_lokasi, t_lokasi.latitude, t_lokasi.longitude, t_lokasi.alamat
                 FROM t_logger
                 INNER JOIN t_lokasi ON t_logger.lokasi_logger = t_lokasi.idlokasi
                 WHERE kategori_log = '{$kat->id_katlogger}'
@@ -1311,8 +1325,11 @@ class Chatbot extends CI_Controller
                 $is_hujan = ($val > 0);
 
                 if ($is_hujan || $filter === 'semua') {
+                    $wil = $this->wilayah->parse($lok->alamat);
                     $pos_data[] = [
                         'pos' => $lok->nama_logger,
+                        'kabupaten' => $wil['kabupaten'],
+                        'kecamatan' => $wil['kecamatan'],
                         'mm' => number_format($val, 2, '.', ''),
                         'klasifikasi' => $klas
                     ];
@@ -1337,8 +1354,11 @@ class Chatbot extends CI_Controller
                 $is_hujan = ($val > 0);
 
                 if ($is_hujan || $filter === 'semua') {
+                    $wil = $this->_wilayah_psda($pid);
                     $pos_data[] = [
                         'pos' => $p['lokasi'] ?? '',
+                        'kabupaten' => $wil['kabupaten'],
+                        'kecamatan' => $wil['kecamatan'],
                         'mm' => number_format($val, 2, '.', ''),
                         'klasifikasi' => $klas
                     ];
@@ -1499,15 +1519,19 @@ class Chatbot extends CI_Controller
     // ─── Helper: klasifikasi curah hujan PER JAM ───
     private function _klasifikasi_hujan_jam($mm)
     {
+        // Batas sama dengan menu Analisa; angka tepat di batas masuk kelas di atasnya:
+        // 0 | 0.1–<1 | 1–<5 | 5–<10 | 10–<20 | ≥20 mm/jam.
+        // round(): label harus cocok dengan angka 2 desimal yang ditampilkan (4.9999999 → 5.00).
+        $mm = round((float) $mm, 2);
         if ($mm <= 0)
             return 'Berawan / Tidak Hujan';
-        if ($mm <= 1)
+        if ($mm < 1)
             return 'Hujan Sangat Ringan';
-        if ($mm <= 5)
+        if ($mm < 5)
             return 'Hujan Ringan';
-        if ($mm <= 10)
+        if ($mm < 10)
             return 'Hujan Sedang';
-        if ($mm <= 20)
+        if ($mm < 20)
             return 'Hujan Lebat';
         return 'Hujan Sangat Lebat';
     }
@@ -1515,15 +1539,18 @@ class Chatbot extends CI_Controller
     // ─── Helper: klasifikasi curah hujan PER HARI ───
     private function _klasifikasi_hujan_harian($mm)
     {
+        // Batas sama dengan menu Analisa (analisa_all/arr/awr.php), untuk total SATU hari:
+        // 0 | 0.1–<5 | 5–<20 | 20–<50 | 50–<100 | ≥100 mm/hari.
+        $mm = round((float) $mm, 2);
         if ($mm <= 0)
             return 'Berawan / Tidak Hujan';
-        if ($mm <= 10)
+        if ($mm < 5)
             return 'Hujan Sangat Ringan';
-        if ($mm <= 20)
+        if ($mm < 20)
             return 'Hujan Ringan';
-        if ($mm <= 50)
+        if ($mm < 50)
             return 'Hujan Sedang';
-        if ($mm <= 100)
+        if ($mm < 100)
             return 'Hujan Lebat';
         return 'Hujan Sangat Lebat';
     }
@@ -2213,7 +2240,10 @@ class Chatbot extends CI_Controller
             if ($is_column) {
                 $item['total'] = round(array_sum($values), 2);
                 $item['max_per_jam'] = round(max($values), 2);
-                $item['klasifikasi_harian'] = $this->_klasifikasi_hujan_harian(array_sum($values));
+                // Standar per hari hanya untuk total SATU hari; total rentang/bulan tidak diklasifikasi.
+                if ($mode === 'harian') {
+                    $item['klasifikasi_harian'] = $this->_klasifikasi_hujan_harian(array_sum($values));
+                }
             } else {
                 $item['rata_rata'] = round(array_sum($values) / count($values), 2);
                 $item['minimum'] = round(min($values), 2);
@@ -3026,6 +3056,39 @@ class Chatbot extends CI_Controller
         $peta = ['awlr' => 'awlr', 'arr' => 'arr', 'ws' => 'awr', 'afmr' => 'afmr'];
         $icon = strtolower((string) $icon);
         return isset($peta[$icon]) ? $peta[$icon] : null;
+    }
+
+    private $_psda_alamat_cache = null;
+
+    /** id_logger PSDA → baris api/list_logger (alamat, kabupaten). Satu request, dicache per-request. */
+    private function _psda_alamat()
+    {
+        if ($this->_psda_alamat_cache !== null) {
+            return $this->_psda_alamat_cache;
+        }
+        $this->_psda_alamat_cache = [];
+
+        $json = $this->_http_get('https://dpupesdm.monitoring4system.com/api/list_logger', 10);
+        $rows = $json ? json_decode($json, true) : null;
+        if (is_array($rows)) {
+            foreach ($rows as $r) {
+                if (!empty($r['id_logger'])) {
+                    $this->_psda_alamat_cache[(string) $r['id_logger']] = $r;
+                }
+            }
+        }
+        return $this->_psda_alamat_cache;
+    }
+
+    /** Kabupaten + kecamatan satu pos PSDA ('' bila tidak diketahui). */
+    private function _wilayah_psda($id_logger)
+    {
+        $psda = $this->_psda_alamat();
+        $r = isset($psda[$id_logger]) ? $psda[$id_logger] : [];
+        return $this->wilayah->parse(
+            isset($r['alamat']) ? $r['alamat'] : '',
+            isset($r['kabupaten']) ? $r['kabupaten'] : ''
+        );
     }
 
     /**
