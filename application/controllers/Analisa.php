@@ -1590,8 +1590,31 @@ class Analisa extends CI_Controller
 		echo json_encode([
 			'status' => 'ok',
 			'data_konten' => $das_psda['data_konten'],
-			'marker' => $das_psda['marker']
+			'marker' => $this->_ikon_psda_lokal($das_psda['marker'])
 		]);
+	}
+
+	/**
+	 * Ikon pos PSDA datang sebagai URL domain PSDA (.../pin_marker/<berkas>.png). Sejak backend PSDA
+	 * pindah ke Go (2026-11-04) domain itu tidak lagi menyajikan /pin_marker/ — dijawab 302 ke go-hidro,
+	 * bukan gambar — sehingga ikon patah di peta. Berkas bernama sama ada di pin_marker/ lokal.
+	 * Ikon yang tidak punya salinan lokal dibiarkan apa adanya.
+	 */
+	private function _ikon_psda_lokal($marker)
+	{
+		if (!is_array($marker)) {
+			return $marker;
+		}
+		foreach ($marker as $i => $mk) {
+			if (empty($mk['icon'])) {
+				continue;
+			}
+			$berkas = basename((string) parse_url($mk['icon'], PHP_URL_PATH));
+			if (preg_match('/^[\w.-]+\.png$/', $berkas) && is_file(FCPATH . 'pin_marker/' . $berkas)) {
+				$marker[$i]['icon'] = base_url() . 'pin_marker/' . $berkas;
+			}
+		}
+		return $marker;
 	}
 
 	function combologger()
