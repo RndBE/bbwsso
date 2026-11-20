@@ -50,7 +50,7 @@
     /* ── Modal Container ── */
     #copilot-modal {
         width: 95%;
-        max-width: 760px;
+        max-width: 840px;
         height: 85vh;
         max-height: 700px;
         background: #ffffff;
@@ -310,7 +310,14 @@
         color: #6b7280;
     }
 
+    /* Jawaban berisi tabel: selebar modal, tanpa batas 85% (meniru ChatGoHidro di go-hidro-next) */
+    .copilot-msg.bot.has-table {
+        align-self: stretch;
+        max-width: none;
+    }
+
     .copilot-table-wrap {
+        max-width: 100%;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         margin: 6px 0;
@@ -320,21 +327,24 @@
         width: 100%;
         min-width: 360px;
         border-collapse: collapse;
-        font-size: 13px;
+        font-size: 13.5px;
+        line-height: 20px;
+        color: #0f172a;
+        background: #fff;
         margin: 0;
     }
 
     .copilot-msg.bot th,
     .copilot-msg.bot td {
-        border: 1px solid #e5e7eb;
-        padding: 5px 8px;
+        border: 1px solid #e2e8f0;
+        padding: 4px 10px;
         text-align: left;
         white-space: nowrap;
     }
 
     .copilot-msg.bot th {
-        background: #eef2ff;
-        color: #303481;
+        background: #f8fafc;
+        color: #0f172a;
         font-weight: 600;
     }
 
@@ -1222,6 +1232,7 @@
                 div.innerHTML = content;
                 // Wrap tables in scrollable container + inject CSV button
                 var tables = div.querySelectorAll('table');
+                if (tables.length) div.classList.add('has-table');
                 tables.forEach(function (tbl, idx) {
                     tbl.querySelectorAll('td').forEach(copilotWarnaiHujan);
                     var wrap = document.createElement('div');
@@ -1302,7 +1313,7 @@
             var url = URL.createObjectURL(blob);
             var a = document.createElement('a');
             a.href = url;
-            a.download = 'data_copilot_' + new Date().toISOString().slice(0, 10) + '.csv';
+            a.download = 'data_sobatso_' + new Date().toISOString().slice(0, 10) + '.csv';
             a.click();
             URL.revokeObjectURL(url);
         }

@@ -158,7 +158,7 @@ Ada **dua standar**, sama dengan menu Analisa. Angka tepat di batas masuk kelas 
 Referensi: [Chatbot.php:462-548](application/controllers/Chatbot.php#L462-L548)
 
 System prompt dibangun ulang **setiap request** dan berisi:
-- **Identitas & peran** sebagai Copilot BBWS Serayu Opak.
+- **Identitas & peran** sebagai SobatSO, asisten monitoring BBWS Serayu Opak (model diminta memperkenalkan diri dengan nama itu).
 - **Wilayah kerja** (Jateng & DIY) + daftar DAS; menolak pertanyaan luar wilayah.
 - **Pengetahuan kategori logger**: AWS = AWR (sama), ARR (hujan), AWLR (TMA/debit), Klimatologi, AFMR (debit).
 - **Konteks waktu dinamis**: sekarang, hari ini, kemarin, bulan ini, tahun ini.
